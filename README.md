@@ -182,12 +182,14 @@ renders Objective, Measure, Done when, every phase/task, all five statuses,
 time estimates, explanations and blockers. Goal fields are not fake tasks
 and do not affect progress; blocked tasks show both their explanation and blocker.
 
-The replacement is not yet accepted for deployment: in a short, narrow pane
-with additional dock widgets, the rich popover can extend above the visible
-pane and make its initial goal fields unreachable. Its viewport-relative
-height cap does not represent the actual space above the pill. This remains
-an open acceptance failure in [the replacement PR](https://github.com/oh-my-omp/omp-todo-more/pull/8);
-the native pill and theme checks do not establish that the full replacement is complete.
+The rich popover is one height-bounded scrolling panel. When the content
+does not fit, scroll inside the panel from the goal fields to the final
+task and the edit button, or back to the top. The height limit includes
+the outer padding; the inner details keep their full content height
+instead of creating a second scroll area or shrinking away the overflow.
+At window heights of 720px or less, the panel opens below the pill as a tray
+at most six terminal line heights tall, leaving the pill exposed for closing
+and reopening. Taller windows keep the popover above the pill.
 
 Tern owns the disclosure state and theme. Appearance changes, named theme
 changes and the selected program-palette variant apply through the native
@@ -248,8 +250,8 @@ its size and theme. A sibling rich body follows its native `.open` state,
 replacing only its built-in list popover so the global goal remains separate
 from tasks. This adapter depends on OMP's dock topology, the native activity
 track and Tern's `.sf-ck-pop` structure: upgrades must re-check geometry,
-other widgets and live theme switching. It does not provide a native
-viewport-clamped body slot. Neither host source nor binaries are patched.
+other widgets and live theme switching. Neither host source nor binaries
+are patched.
 
 The Tern stylesheet and OMP extension must be enabled together. The
 stylesheet hides the native HUD while the Tern plugin is enabled, including
