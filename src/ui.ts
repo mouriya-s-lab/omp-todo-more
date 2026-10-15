@@ -421,19 +421,18 @@ function viewedSession(tui: TUI, mainAgentId: string): AgentSession | undefined 
 
 /** Native-only presentation; the branch remains its only Todo state. */
 class TodoHud implements Component {
-	private collapsed = true;
-
 	constructor(
 		private readonly pi: ExtensionAPI,
 		private readonly readSession: () => AgentSession | undefined,
 		private readonly open: () => Promise<void>,
-		private readonly requestRender: () => void,
 	) {}
 
 	describe(): NativeNode | null {
 		try {
 			const session = this.readSession();
-			return session === undefined ? null : describeTodoHud(toSnapshot(readTodoMore(session.sessionManager.getBranch())), this.collapsed);
+			const described = session === undefined ? null : describeTodoHud(toSnapshot(readTodoMore(session.sessionManager.getBranch())));
+			// Keep our own slot identifiable when empty, without showing a pill.
+			return described ?? node("row", { role: "omp.hud.activity", aria: "Todo More progress", hidden: true });
 		} catch (error) {
 			this.pi.logger.warn("todo-more HUD could not read the current branch", { error: errorText(error) });
 			return null;
@@ -444,20 +443,14 @@ class TodoHud implements Component {
 		return NO_ANSI_HUD_ROWS;
 	}
 
-	setCollapsed(collapsed: boolean): void {
-		this.collapsed = collapsed;
-		this.requestRender();
-	}
-
 	handleNativeEvent(event: NativeUiEvent): void {
-		if (event.type === "toggle" && event.key === "") this.setCollapsed(event.collapsed);
-		else if (event.type === "action" && event.act === "todo-more.open") void this.open();
+		if (event.type === "action" && event.act === "todo-more.open") void this.open();
 	}
 }
 
 export function registerUi(pi: ExtensionAPI): void {
 	let active: { controller: AbortController; session: AgentSession } | undefined;
-	let hud: { component: TodoHud; tui: TUI } | undefined;
+	let hudTui: TUI | undefined;
 	const cancel = (): void => {
 		active?.controller.abort();
 		active = undefined;
@@ -477,7 +470,7 @@ export function registerUi(pi: ExtensionAPI): void {
 			});
 			return;
 		}
-		const session = hud === undefined ? undefined : currentSession(hud.tui, ctx.agent.id);
+		const session = hudTui === undefined ? undefined : currentSession(hudTui, ctx.agent.id);
 		if (session == null || active) return;
 		const opened = { controller: new AbortController(), session };
 		active = opened;
@@ -507,20 +500,18 @@ export function registerUi(pi: ExtensionAPI): void {
 	const installHud = (ctx: ExtensionContext): void => {
 		if (!ctx.hasUI) return;
 		const session = AgentRegistry.global().get(ctx.agent.id)?.session;
-		hud = undefined;
+		hudTui = undefined;
 		ctx.ui.setWidget(
 			HUD_WIDGET_KEY,
 			session == null
 				? undefined
 				: (tui) => {
-						const component = new TodoHud(
+						hudTui = tui;
+						return new TodoHud(
 							pi,
 							() => currentSession(tui, ctx.agent.id),
 							() => open(ctx),
-							() => tui.requestRender(),
 						);
-						hud = { component, tui };
-						return component;
 					},
 			{ placement: "belowEditor" },
 		);
@@ -541,18 +532,14 @@ export function registerUi(pi: ExtensionAPI): void {
 	pi.on("session_shutdown", (_event, ctx) => {
 		cancel();
 		if (ctx.hasUI) ctx.ui.setWidget(HUD_WIDGET_KEY, undefined);
-		hud = undefined;
+		hudTui = undefined;
 	});
 	pi.on("input", (event, ctx) => {
-		if (event.source !== "interactive" || !ctx.hasUI || !hud?.tui.nativeRendering) return;
+		if (event.source !== "interactive" || !ctx.hasUI || !hudTui?.nativeRendering) return;
 		const command = /^\/todo(?:[\s:]+(.*))?$/s.exec(event.text.trim());
 		if (command === null) return;
 		const args = (command[1] ?? "").trim().toLowerCase();
 		if (args === "" || args === "edit") return { text: "/todo-more" };
-		if (args === "expand" || args === "collapse") {
-			hud.component.setCollapsed(args === "collapse");
-			return { handled: true };
-		}
 	});
 	pi.registerCommand("todo-more", {
 		description: "Show rich todos and edit the current session's goal and explanations",

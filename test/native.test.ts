@@ -4,8 +4,6 @@ import { describeSnapshot, describeTodoHud, describeTodoResult } from "../src/na
 import type { TodoMoreSnapshot } from "../src/state.ts";
 import type { TodoMoreDetails } from "../src/tool.ts";
 
-type SnapshotItem = TodoMoreSnapshot["phases"][number]["items"][number];
-
 const snapshot: TodoMoreSnapshot = {
 	goal: {
 		objective: "Ship the native todo replacement",
@@ -236,45 +234,7 @@ describe("native todo presentation", () => {
 });
 
 describe("native todo HUD", () => {
-	const transitions: readonly { completed: readonly string[]; current: string; closed: number }[] = [
-		{ completed: [], current: "Implement the card", closed: 2 },
-		{ completed: ["Implement the card"], current: "Plan the replacement", closed: 3 },
-		{ completed: ["Implement the card", "Plan the replacement"], current: "Blocked: Check runtime", closed: 4 },
-		{ completed: ["Implement the card", "Plan the replacement", "Check runtime"], current: "All done", closed: 5 },
-	];
-
-	for (const transition of transitions) {
-		test(`shows ${transition.current} with ${transition.closed}/5 genuinely closed tasks`, () => {
-			const current: TodoMoreSnapshot = {
-				...snapshot,
-				phases: snapshot.phases.map((phase) => ({
-					...phase,
-					items: phase.items.map(
-						(item): SnapshotItem => (transition.completed.includes(item.title) ? { ...item, status: "completed" } : item),
-					),
-				})),
-			};
-			const hud = describeTodoHud(current);
-			if (hud === null) throw new Error("Expected a HUD for a nonempty list");
-			expect(hud.k).toBe("card");
-			expect(hud.p).toMatchObject({ collapsed: true, collapsible: true, aria: `Todo More, ${transition.closed} of 5 closed` });
-			const nodes = nativeNodes([hud]);
-			const meter = only(nodes.filter((entry) => entry.k === "meter"));
-			expect(meter.p?.value).toBe(transition.closed / 5);
-			const head = only(nodes.filter((entry) => entry.key === "head"));
-			const text = nativeNodes(head.c ?? []).filter((entry) => entry.k === "text");
-			expect(text.map((entry) => entry.p?.text ?? entry.p?.spans?.map((part) => part.t).join(""))).toEqual([
-				transition.current,
-				`${transition.closed}/5`,
-			]);
-		});
-	}
-
-	test("expanded HUD retains its full rich body and empty lists have no HUD", () => {
-		const expanded = describeTodoHud(snapshot, false);
-		if (expanded === null) throw new Error("Expected an expanded HUD");
-		expect(expanded.p).toMatchObject({ collapsed: false });
-		expect(checklist([expanded]).phases.flatMap((phase) => phase.items)).toHaveLength(5);
+	test("empty lists have no HUD, including a phase with no tasks", () => {
 		expect(describeTodoHud({ goal: null, phases: [] })).toBeNull();
 		expect(describeTodoHud({ goal: snapshot.goal, phases: [{ name: "Empty phase", items: [] }] })).toBeNull();
 	});

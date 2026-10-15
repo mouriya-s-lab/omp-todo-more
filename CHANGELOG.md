@@ -2,9 +2,9 @@
 
 ## Unreleased
 
-- Replaced Tern's native bottom Todo display with a compact Todo More progress card and a full, upward-opening popover, without modifying OMP or discarding its Todo projection.
+- Used Tern's actual checklist HUD directly in the native activity track, retaining native sizing, long-title truncation, disclosure and live theme switching. Replacement acceptance remains blocked by rich-popover overflow above short, narrow panes with additional dock widgets.
 - Unified native tool results, progress details and reminder snapshots around goal fields and the native checklist, preserving explanations alongside blockers and keeping real task counts.
-- Routed Tern's `/todo` and `/todo edit` to the rich editor and `/todo expand` / `/todo collapse` to the replacement card, while retaining task-management subcommands and the ANSI HUD.
+- Routed Tern's `/todo` and `/todo edit` to the rich editor while preserving other host subcommands and the ANSI HUD; native pill disclosure remains terminal-owned.
 - Followed the host composer's live viewed-agent lineage for child/nested-session progress and edits; commits append through the target session's own manager rather than an extension-bound main-session writer.
 - Shared the domain snapshot schema directly across persisted, tool-result and reminder boundaries so packaged extensions load on the managed OMP runtime without schema introspection.
 - Require a model-provided positive integer `estimatedMinutes` for every new Todo item, reject fractions without rounding, and add `estimate` to supply or revise budgets without erasing elapsed work.

@@ -87,11 +87,15 @@ GUI 编辑意图只有 `set_goal` 和按完整 title 的 `explain`，不增加�
 
 ## 原生展示与编辑
 
-Todo More 在 Tern 顶替原生底部 Todo 进度。紧凑卡片显示进度环、当前任务和 closed/total；completed 与 abandoned 都计为 closed。点击卡片向上展开可滚动内容，显示 Objective、Measure、Done when、全部 phase/task、五种 status、预估耗时、explanation 和 blocker。goal 不伪装成任务，不影响进度；blocked 任务同时保留解释与阻塞原因。
+Todo More 在 Tern 使用真正的原生 `checklist` HUD 药丸，不再用 card 重画外观。checklist 直接放在原生 activity 行中，保留 `omp.hud.todo` role；内容宽度、高度、长标题截断、进度环、字体和 hover 均由 Tern 决定。点击后渲染 Objective、Measure、Done when、全部 phase/task、五种 status、预估耗时、explanation 和 blocker。goal 不伪装成任务，不影响进度；blocked 项同时显示解释与阻塞原因。
+
+当前替代实现尚未通过部署验收：在较矮的窄 pane 中叠加其他 dock widget 后，富信息 popover 可能伸出可见区域顶部，导致开头的 goal 字段无法读取。按 viewport 百分比限制高度不能代表药丸上方的实际可用空间。[替代实现 PR](https://github.com/oh-my-omp/omp-todo-more/pull/8) 仍保留这项失败；药丸与主题检查通过不代表完整替代已经完成。
+
+展开状态和主题由 Tern 维护。appearance、命名主题与对应 program palette 的切换通过原生 renderer 和继承变量即时生效，包括富内容已经展开时。插件不保存主题或展开状态副本，不设置药丸宽度、字体、padding 或颜色。
 
 原生工具卡片和提醒使用同一套 goal 字段与原生 checklist 展示。历史工具卡片使用当次 `details.more`，提醒保留其发生时的快照；两者不成为编辑源，也不随当前列表编辑而改变。
 
-Tern 中的 `/todo` 与 `/todo edit` 打开富信息 `/todo-more` 编辑器，`/todo expand` 与 `/todo collapse` 控制替代进度卡片。其他宿主 `/todo` 子命令继续可用，任务变更按前述规则按标题联结。普通 ANSI OMP 保留宿主 `/todo` 命令和 HUD；替代 widget 不输出 ANSI 行，不产生重复进度。
+Tern 中的 `/todo` 与 `/todo edit` 打开富信息 `/todo-more` 编辑器。其余 `/todo` 子命令（包括 expand/collapse）保留宿主行为；药丸自身的点击控制原生展开。任务变更按前述规则按标题联结。普通 ANSI OMP 保留宿主命令和 HUD，替代 widget 不输出 ANSI 行。
 
 在 OMP/Tern 中输入 `/todo-more` 打开当前会话的编辑 overlay。Tab/Shift+Tab 或上下方向键选择动作，当前动作以 accent 标记，Enter 打开它；任务删除后选择位置按当前列表收敛。进度 popover 的编辑按钮进入同一个编辑器，不另建编辑实现。
 
@@ -101,7 +105,9 @@ Tern 中的 `/todo` 与 `/todo edit` 打开富信息 `/todo-more` 编辑器，`/
 
 ## Tern 资产生命周期
 
-包附带 `tern/plugin.toml`、`todo-more.css`、`window.luau`。实时进度卡片、完整 checklist 和编辑由 OMP native components 提供；Tern window entry 满足 stylesheet 插件的 manifest 契约，不建立第二套状态存储或编辑器。CSS 仅隐藏宿主 dock 中的 `omp.hud.todo`，并用 Tern 主题变量呈现 Todo More 卡片、向上 popover 和富字段。宿主 Todo 投影继续供 `/todo`、会话恢复及其他消费者使用，不修改 OMP 或 Tern 宿主。
+包附带 `tern/plugin.toml`、`todo-more.css`、`window.luau`。原生药丸、完整 checklist 和编辑由 OMP native components 提供；window entry 满足 stylesheet manifest 契约，不建立第二套状态或编辑器。样式仅作用于 `omp.session` surface，将原生 Todo 设为不可见但保留其真实布局占位和宿主任务投影。
+
+当前 OMP native dock 有十三个源插槽。CSS grid 适配保留各插槽，将 Todo More 放入原有 activity track，其他 below-editor widget 仍按正常顺序显示。药丸尺寸和主题仍由 Tern 原生实现决定；相邻富内容仅跟随其 `.open` 状态，替换内建列表 popover，使全局 goal 不必塞入任务。该适配依赖 OMP dock 拓扑、原生 activity track 和 Tern 的 `.sf-ck-pop` 结构，升级后须重验几何、多 widget 与实时主题切换；它不提供原生的 viewport-clamped body slot，也不修改宿主源码或二进制。
 
 Tern 样式插件必须与 OMP 扩展成套启用。Tern 插件启用期间，样式会隐藏原生 HUD，包括没有加载本 OMP 扩展的会话；禁用或移除 Tern 插件会恢复原生 HUD。Tern CSS 不支持 `:has()` 条件，不承诺 OMP 扩展缺失时自动回退原生 HUD。
 

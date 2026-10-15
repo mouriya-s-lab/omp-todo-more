@@ -174,25 +174,37 @@ repair an earlier partial projection failure. `view` stays a pure read.
 
 ## Native display and editing
 
-In Tern, Todo More replaces the built-in bottom Todo progress display. Its
-compact card shows a progress ring, the current task and the closed/total
-count; completed and abandoned tasks count as closed. Click the card to open
-an upward, scrollable popover containing Objective, Measure, Done when, every
-phase/task, all five statuses, time estimates, explanations and blockers. Goal fields are not
-fake tasks and do not affect progress. A blocked task shows both its
-explanation and blocker.
+In Tern, Todo More uses the terminal's actual `checklist` HUD pill, not a
+restyled card. The checklist is a direct child of the native activity row,
+with the original `omp.hud.todo` role; Tern owns its intrinsic sizing,
+long-title truncation, ring, typography and hover treatment. Clicking it
+renders Objective, Measure, Done when, every phase/task, all five statuses,
+time estimates, explanations and blockers. Goal fields are not fake tasks
+and do not affect progress; blocked tasks show both their explanation and blocker.
+
+The replacement is not yet accepted for deployment: in a short, narrow pane
+with additional dock widgets, the rich popover can extend above the visible
+pane and make its initial goal fields unreachable. Its viewport-relative
+height cap does not represent the actual space above the pill. This remains
+an open acceptance failure in [the replacement PR](https://github.com/oh-my-omp/omp-todo-more/pull/8);
+the native pill and theme checks do not establish that the full replacement is complete.
+
+Tern owns the disclosure state and theme. Appearance changes, named theme
+changes and the selected program-palette variant apply through the native
+renderer and inherited variables, including while the rich popover is open.
+The plugin stores no theme or open-state copy and sets no pill width,
+font, padding or color.
 
 Native tool cards and reminder notices use the same goal fields and native
 checklist presentation. Historical tool cards render their own `details.more`;
 reminders keep the snapshot from their own event. Neither becomes an edit
 source or changes when the current list is edited.
 
-In Tern, `/todo` and `/todo edit` open the rich `/todo-more` editor;
-`/todo expand` and `/todo collapse` control the replacement progress card.
-Other host `/todo` subcommands remain available, and their task changes are
-joined by title as described above. Plain ANSI OMP keeps the host `/todo`
-command and HUD; the replacement widget emits no ANSI rows, so it adds no
-duplicate progress display.
+In Tern, `/todo` and `/todo edit` open the rich `/todo-more` editor.
+Other `/todo` subcommands, including `expand` and `collapse`, retain their
+host behavior; the native pill's own click controls its disclosure.
+Task changes are joined by title as described above. Plain ANSI OMP keeps
+the host command and HUD; the replacement widget emits no ANSI rows.
 
 `/todo-more` opens the current session's editing overlay in OMP or Tern.
 Tab/Shift+Tab or the up/down arrows select an action, the current action is
@@ -223,13 +235,21 @@ reports that it is unavailable and leaves the Todo unchanged.
 ## Tern asset lifecycle
 
 The package ships `tern/plugin.toml`, `todo-more.css` and `window.luau`.
-OMP native components provide the live progress card, full checklist and
-editing; the window entry satisfies the stylesheet-plugin manifest contract
-and does not create a second state store or editor. The stylesheet hides
-only the host dock's `omp.hud.todo` and styles Todo More's card, upward
-popover and rich fields with Tern's theme tokens. The host Todo projection
-is still maintained for `/todo`, session restoration and other consumers;
-neither OMP nor Tern needs to be patched.
+OMP native components provide the native pill, full checklist and editing;
+the window entry satisfies the stylesheet manifest contract and does not
+create another state store or editor. The stylesheet only changes the
+`omp.session` surface. It makes the original Todo invisible but retains its
+layout box and real host projection.
+
+The current OMP native dock has thirteen source slots. A CSS grid adapter
+preserves those slots and places Todo More in the existing activity track;
+other below-editor widgets remain in normal order. Tern's native pill owns
+its size and theme. A sibling rich body follows its native `.open` state,
+replacing only its built-in list popover so the global goal remains separate
+from tasks. This adapter depends on OMP's dock topology, the native activity
+track and Tern's `.sf-ck-pop` structure: upgrades must re-check geometry,
+other widgets and live theme switching. It does not provide a native
+viewport-clamped body slot. Neither host source nor binaries are patched.
 
 The Tern stylesheet and OMP extension must be enabled together. The
 stylesheet hides the native HUD while the Tern plugin is enabled, including
