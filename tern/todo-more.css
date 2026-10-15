@@ -82,17 +82,19 @@
 	position: absolute;
 	left: 0;
 	right: 0;
-	/* The native 24px pill is centered in the 26px activity track. */
-	bottom: calc(100% + 7px);
+	/* Keep details in the composer's reserved area as its height changes.
+	 * The native pill stays exposed and remains the only disclosure control. */
+	top: calc(100% + 7px);
 	z-index: 20;
 	box-sizing: border-box;
 	width: auto !important;
 	max-width: 360px !important;
-	max-height: 40vh;
+	max-height: calc(6 * var(--sf-lh, 17px));
 	margin-left: auto;
-	padding: var(--sf-lh, 17px) 12px;
+	padding: 8px 12px;
 	border-radius: var(--r-card);
 	background: var(--pop-bg, var(--card));
+	backdrop-filter: blur(32px) saturate(190%);
 	box-shadow: inset 0 0 0 1px var(--l2), 0 8px 24px var(--l2);
 	pointer-events: auto;
 	overflow-x: hidden;
@@ -108,16 +110,6 @@
 	padding: 0 16px 0 4px;
 }
 
-/* A compact window has more usable space in the composer's reserved area.
- * Keep the trigger exposed and open a short scrolling tray below it. */
-@media (max-height: 720px) {
-	[aria-label="Todo More popover"] {
-		top: calc(100% + 7px);
-		bottom: auto;
-		max-height: calc(6 * var(--sf-lh, 17px));
-		padding: 8px 12px;
-	}
-}
 
 [data-role="todo-more.list"] .sf-ck-note {
 	white-space: pre-wrap;

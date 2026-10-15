@@ -187,9 +187,13 @@ does not fit, scroll inside the panel from the goal fields to the final
 task and the edit button, or back to the top. The height limit includes
 the outer padding; the inner details keep their full content height
 instead of creating a second scroll area or shrinking away the overflow.
-At window heights of 720px or less, the panel opens below the pill as a tray
-at most six terminal line heights tall, leaving the pill exposed for closing
-and reopening. Taller windows keep the popover above the pill.
+The panel opens below the pill in every window, at most six terminal line
+heights tall including padding. It overlays part of the composer while open;
+click the exposed native pill to close it and uncover the input. Keeping the
+scroll container in that reserved area also accommodates a growing multiline
+composer without guessing how much space remains above the pill.
+Its themed glass backdrop blurs the covered composer so the input text does
+not show through the Todo details.
 
 Tern owns the disclosure state and theme. Appearance changes, named theme
 changes and the selected program-palette variant apply through the native

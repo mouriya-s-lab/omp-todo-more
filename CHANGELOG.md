@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-- Used Tern's actual checklist HUD directly in the native activity track, retaining native sizing, long-title truncation, disclosure and live theme switching. Bounded the rich popover's entire outer height and made it a single scroll area so overflow can be read without shrinking the details or moving the pill.
+- Used Tern's actual checklist HUD directly in the native activity track, retaining native sizing, long-title truncation, disclosure and live theme switching. Placed the rich popover below the pill with a bounded outer height and one scroll area, so a growing composer cannot push its goal fields above the viewport and the details are not compressed to hide overflow.
+- Applied the themed glass backdrop to the scroll tray so covered composer text does not bleed through the Todo fields.
 - Unified native tool results, progress details and reminder snapshots around goal fields and the native checklist, preserving explanations alongside blockers and keeping real task counts.
 - Routed Tern's `/todo` and `/todo edit` to the rich editor while preserving other host subcommands and the ANSI HUD; native pill disclosure remains terminal-owned.
 - Followed the host composer's live viewed-agent lineage for child/nested-session progress and edits; commits append through the target session's own manager rather than an extension-bound main-session writer.
