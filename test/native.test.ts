@@ -102,10 +102,14 @@ function resultFor(more: TodoMoreSnapshot): Parameters<typeof describeTodoResult
 	};
 }
 
-function resultBody(result: Parameters<typeof describeTodoResult>[0]): readonly NativeChild[] {
-	const view = describeTodoResult(result, { expanded: false, isPartial: false });
+function resultBody(result: Parameters<typeof describeTodoResult>[0], expanded = false): readonly NativeChild[] {
+	const view = describeTodoResult(result, { expanded, isPartial: false });
 	if (view?.body === undefined) throw new Error("Expected a native result body");
 	return view.body;
+}
+
+function rows(children: readonly NativeChild[]) {
+	return checklist(children).phases.flatMap((phase) => phase.items);
 }
 
 describe("native todo presentation", () => {
@@ -256,6 +260,52 @@ describe("native todo HUD", () => {
 	});
 });
 
+describe("native result card", () => {
+	test("collapsed card shows only the objective, folds closed phases, and keeps estimate and blocker on each row", () => {
+		const body = resultBody(
+			resultFor({
+				goal: { objective: "Ship", measure: "Measured", doneWhen: "Done" },
+				phases: [
+					{ name: "Closed", items: [{ title: "Old", explanation: "Done already", status: "completed", time: { kind: "missing" } }] },
+					{
+						name: "Open",
+						items: [
+							{
+								title: "Blocked task",
+								explanation: "Waits",
+								status: "blocked",
+								blocker: "Waiting for review",
+								time: { kind: "estimated", budgetId: "open-budget", minutes: 12, elapsedMs: 0, runningSince: null },
+							},
+						],
+					},
+				],
+			}),
+		);
+
+		expect(nativeNodes(body).filter((entry) => entry.k === "kv")).toHaveLength(0);
+		expect(
+			nativeNodes(body)
+				.filter((entry) => entry.k === "text")
+				.map((entry) => entry.p?.text),
+		).toContain("Objective: Ship");
+		expect(checklist(body).phases.map((phase) => phase.collapsed)).toEqual([true, false]);
+		expect(rows(body).map((item) => item.note)).toEqual([undefined, undefined]);
+		expect(rows(body)[1]?.text).toBe("Blocked task · 12m · blocked: Waiting for review");
+	});
+
+	test("expanded card restores every goal field and each row's explanation", () => {
+		const body = resultBody(resultFor(snapshot), true);
+
+		expect(goalItems(body)).toEqual([
+			{ k: "Objective", v: "Ship the native todo replacement" },
+			{ k: "Measure", v: "Every task and explanation is visible" },
+			{ k: "Done when", v: "The replacement preserves all rich todo fields" },
+		]);
+		expect(rows(body).map((item) => item.note)).toContain("Explanation: Keep the host projection");
+	});
+});
+
 describe("native historical todo results", () => {
 	test("renders each result's own details.more and timing after a different, newer snapshot was rendered", () => {
 		const historical = resultFor(snapshot);
@@ -281,40 +331,28 @@ describe("native historical todo results", () => {
 		});
 		// A conflicting host projection must not replace the result's rich display copy.
 		historical.details = { ...historical.details, phases: newer.details.phases };
-		const newerBody = resultBody(newer);
-		const historicalBody = resultBody(historical);
+		const newerBody = resultBody(newer, true);
+		const historicalBody = resultBody(historical, true);
 
 		expect(goalItems(newerBody)).toEqual([
 			{ k: "Objective", v: "A new objective" },
 			{ k: "Measure", v: "A new measure" },
 			{ k: "Done when", v: "A new completion boundary" },
 		]);
-		expect(checklist(newerBody).phases.flatMap((phase) => phase.items.map((item) => item.text))).toEqual(["A new task", "Check runtime"]);
-		expect(
-			only(
-				checklist(newerBody)
-					.phases.flatMap((phase) => phase.items)
-					.filter((item) => item.text === "Check runtime"),
-			).note,
-		).toBe("Estimate: 45 min\nExplanation: A newer runtime check");
+		expect(rows(newerBody).map((item) => item.text)).toEqual(["A new task · no estimate", "Check runtime · 45m"]);
+		expect(rows(newerBody)[1]?.note).toBe("Explanation: A newer runtime check");
 		expect(goalItems(historicalBody)).toEqual([
 			{ k: "Objective", v: "Ship the native todo replacement" },
 			{ k: "Measure", v: "Every task and explanation is visible" },
 			{ k: "Done when", v: "The replacement preserves all rich todo fields" },
 		]);
-		expect(checklist(historicalBody).phases.flatMap((phase) => phase.items.map((item) => item.text))).toEqual([
-			"Plan the replacement",
-			"Implement the card",
-			"Inspect saved fields",
-			"Old approach",
-			"Check runtime",
+		expect(rows(historicalBody).map((item) => item.text)).toEqual([
+			"Plan the replacement · no estimate",
+			"Implement the card · 25m",
+			"Inspect saved fields · 10m",
+			"Old approach · no estimate",
+			"Check runtime · 12m · blocked: Waiting for the terminal",
 		]);
-		expect(
-			only(
-				checklist(historicalBody)
-					.phases.flatMap((phase) => phase.items)
-					.filter((item) => item.text === "Check runtime"),
-			).note,
-		).toBe("Estimate: 12 min\nExplanation: Exercise the real native consumer\nBlocker: Waiting for the terminal");
+		expect(rows(historicalBody)[4]?.note).toBe("Explanation: Exercise the real native consumer");
 	});
 });

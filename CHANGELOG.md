@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Compacted the Todo result card to native shape: a batch expands only the phases it touches, untouched phases fold to one summary line, and each task is one row with its estimate, missing-explanation flag and blocker inline. Collapsed native-view results show only the objective; expanding restores Measure, Done when and each explanation. Field content is unchanged, only its layout.
 - Retained Tern's actual checklist HUD visuals in the native activity track, preserving pill sizing, long-title truncation, ring, typography and live theme switching. Used one supported native-card disclosure control with session-bound state instead of duplicating the checklist's local open state.
 - Restored the original above-pill positioning, 360px width, 420px maximum height, internal scrolling, popup material and motion in a native-sized Todo wrapper. Kept the popup beside the disclosure so pill hover follows the trigger without leaking into popup interactions. Removed the generic portal, height-allocation canvas, direction-flip path and below-pill tray. Preserved Spine's native widget spacing, padding and background band through the dock adapter.
 - Unified native tool results, progress details and reminder snapshots around goal fields and the native checklist, preserving explanations alongside blockers and keeping real task counts.

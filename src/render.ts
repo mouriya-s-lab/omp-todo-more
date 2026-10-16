@@ -2,7 +2,7 @@ import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
 import { type ToolRenderResultOptions, z } from "@oh-my-pi/pi-coding-agent";
 import { type Component, replaceTabs, Text, type Theme, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@oh-my-pi/pi-tui";
 import { previewTodo, type TodoCommand, type TodoPreview, type TodoTarget } from "./protocol.ts";
-import { goalLines, TODO_STATUSES, type TodoMoreSnapshot, type TodoStatus, timeEstimateText, todoMoreSnapshotSchema } from "./state.ts";
+import { goalLines, TODO_STATUSES, type TodoMoreSnapshot, type TodoStatus, todoMoreSnapshotSchema } from "./state.ts";
 import { OPS, RESULT_OPS, type TodoMoreDetails } from "./tool.ts";
 
 /** Result snapshots are display copies, not a second source of todo state. */
@@ -151,7 +151,7 @@ function phaseRomanNumeral(index: number): string {
 // @upstream-end
 
 // @upstream adapted @oh-my-pi/pi-tui@18.10.1 src/tools/todo.ts#isClosedTodo
-function isClosed(item: { status: TodoStatus }): boolean {
+export function isClosed(item: { status: TodoStatus }): boolean {
 	return item.status === "completed" || item.status === "abandoned";
 }
 // @upstream-end
@@ -195,8 +195,8 @@ function touchedPhases(
 	completed: NonNullable<TodoMoreDetails["completedTasks"]>,
 	op: TodoMoreDetails["op"],
 ): Set<string> | null {
-	// A batch can touch unrelated targets; retain every final phase rather than hide one.
-	if (op === "batch" || op === "init") return new Set(phases.map((phase) => phase.name));
+	// Each op names the phases it touches; only init widens to every phase.
+	if (op === "init") return new Set(phases.map((phase) => phase.name));
 	const touched = new Set<string>();
 	for (const phase of phases) if (phase.items.some((item) => item.status === "in_progress")) touched.add(phase.name);
 	for (const transition of completed) touched.add(transition.phase);
@@ -241,34 +241,32 @@ function completionLabel(text: string, transitioned: boolean, frame: number | un
 // @upstream-end
 
 // @upstream adapted @oh-my-pi/pi-tui@18.10.1 src/tools/todo.ts#formatTodoLine
+/** One row per task: estimate and missing explanation stay inline so the collapsed card keeps every field on one line. */
+export function compactTodoLabel(item: Item): string {
+	const parts = [forDisplay(item.title), item.time.kind === "estimated" ? `${item.time.minutes}m` : "no estimate"];
+	if (item.explanation === null) parts.push("[explanation missing]");
+	if (item.status === "blocked") parts.push(item.blocker ? `blocked: ${forDisplay(item.blocker)}` : "blocked");
+	return parts.join(" · ");
+}
+
 function formatItem(item: Item, theme: Theme, transitioned: boolean, frame: number | undefined): string {
-	const text = forDisplay(item.title);
-	let line: string;
+	const text = compactTodoLabel(item);
 	switch (item.status) {
 		case "completed":
-			line = theme.fg("success", `${theme.checkbox.checked} ${completionLabel(text, transitioned, frame)}`);
-			break;
+			return theme.fg("success", `${theme.checkbox.checked} ${completionLabel(text, transitioned, frame)}`);
 		case "in_progress":
-			line = theme.fg("accent", `${theme.checkbox.unchecked} ${text}`);
-			break;
+			return theme.fg("accent", `${theme.checkbox.unchecked} ${text}`);
 		case "abandoned":
-			line = theme.fg("error", `${theme.checkbox.unchecked} ${strike(text)}`);
-			break;
-		case "blocked": {
-			const note = item.blocker ? `blocked: ${forDisplay(item.blocker)}` : "blocked";
-			line = theme.fg("warning", `${theme.checkbox.unchecked} ${text} (${note})`);
-			break;
-		}
+			return theme.fg("error", `${theme.checkbox.unchecked} ${strike(text)}`);
+		case "blocked":
+			return theme.fg("warning", `${theme.checkbox.unchecked} ${text}`);
 		case "pending":
-			line = theme.fg("dim", `${theme.checkbox.unchecked} ${text}`);
-			break;
+			return theme.fg("dim", `${theme.checkbox.unchecked} ${text}`);
 		default: {
 			const unreachable: never = item.status;
 			throw new Error(`Unexpected todo status: ${String(unreachable)}`);
 		}
 	}
-	const title = item.explanation === null ? `${line} ${theme.fg("warning", "[explanation missing]")}` : line;
-	return `${title}\n${theme.fg(item.time.kind === "missing" ? "warning" : "dim", timeEstimateText(item.time))}`;
 }
 // @upstream-end
 
@@ -364,9 +362,7 @@ export function renderTodoResult(
 				const last = row === selection.items.length - 1 && selection.summary === "";
 				const branch = theme.fg("dim", last ? theme.tree.last : theme.tree.branch);
 				const continued = last ? "   " : `${theme.tree.vertical}  `;
-				const rendered = formatItem(item, theme, completionKeys.has(`${phase.name}\u0000${item.title}`), spinnerFrame).split("\n");
-				for (let line = 0; line < rendered.length; line++)
-					lines.push(`  ${line === 0 ? `${branch} ` : theme.fg("dim", continued)}${rendered[line] ?? ""}`);
+				lines.push(`  ${branch} ${formatItem(item, theme, completionKeys.has(`${phase.name}\u0000${item.title}`), spinnerFrame)}`);
 				if (expanded && !isClosed(item)) {
 					const explanation = forDisplay(item.explanation ?? "(no explanation yet: add one with EXPLAIN)");
 					for (const line of explanation.split("\n")) lines.push(`  ${theme.fg("dim", continued)}  ${theme.fg("dim", line)}`);
