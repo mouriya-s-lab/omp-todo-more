@@ -34,21 +34,82 @@ host imports.
 
 ## Tool and state
 
-The `todo` operations are `init/start/done/rm/drop/block/unblock/append/view/explain/estimate`.
-A task's identity is its complete title; the goal is
-`{objective, measure, doneWhen}` and a new task is
-`{title, explanation, estimatedMinutes}`. The model must estimate every item
-it creates through `init` or `append`; there is no default estimate.
-`estimatedMinutes` is a positive integer; fractions are rejected rather than
-rounded. Its maximum is `Math.floor(Number.MAX_SAFE_INTEGER / 60_000)` so
-conversion to milliseconds stays safe. Missing or invalid estimates reject the whole call.
-An empty list carries no goal. When an existing list lacks a goal, the next
-mutation must supply one.
+The model sends one Todo document per call. OMP providers with custom-tool
+support use an edit-style Lark grammar; function-tool providers send
+`{input: "<the same document>"}`. Both use the same parser and executor.
 
-The current session branch is the only authority. Every successful mutation
-that changes state appends a complete `mouriya.omp.todo-more` snapshot and
-updates the host TodoTracker projection. The result keeps `todoMore: true`,
-`details.more`, native-compatible phases, storage and completion transitions.
+Initialize the entire plan in one call:
+
+```text
+*** Begin Todo
+INIT "Deliver streaming todos" "The real user path passes" "Implementation and runtime verification are complete"
+PHASE "Implementation"
+ADD "Implement the parser" "Accept complete documents and preserve exact titles" 20
+ADD "Render the preview" "Display intent without changing saved state" 10
+PHASE "Verification"
+ADD "Exercise the installed tool" "Check the real tool and restored result" 15
+*** End Todo
+```
+
+Batch related edits in the next call:
+
+```text
+*** Begin Todo
+DONE "Implement the parser"
+START "Render the preview"
+EXPLAIN "Render the preview" "Check ANSI and native call previews"
+ESTIMATE "Render the preview" 12
+PHASE "Verification"
+ADD "Inspect task history" "Confirm accepted operation order" 5
+*** End Todo
+```
+
+Each uppercase command occupies one physical line. String arguments use JSON
+quoting; `\"`, `\\` and `\n` preserve quotes, backslashes and multiline text
+without trimming the task's complete title.
+
+| Command | Meaning |
+|---|---|
+| `INIT "objective" "measure" "doneWhen"` | Replace the list and goal; first and unique. Following phase/add lines form one initialization. |
+| `PHASE "name"` followed by `ADD "title" "explanation" minutes` | Append one or more explicitly estimated tasks, creating the phase if needed. Every append block requires its own phase. |
+| `ESTIMATE "title" minutes` | Supply or revise the existing task's total budget without resetting elapsed work. |
+| `GOAL "objective" "measure" "doneWhen"` | Replace all goal fields on a nonempty list without changing task status or clocks. |
+| `START "title"` | Select the active task. |
+| `EXPLAIN "title" "explanation"` | Replace the task's explanation. |
+| `DONE target`, `DROP target`, `RM target` | Complete, abandon or remove the quoted title, `PHASE "name"`, or `ALL`. |
+| `BLOCK target ["reason"]`, `UNBLOCK target` | Block or unblock the quoted title or `PHASE "name"`; neither accepts `ALL`. |
+| `VIEW` | Read the list; it must be the document's sole command. |
+
+Every ADD needs a model-provided positive integer estimate, with no default
+or rounding. The maximum is `Math.floor(Number.MAX_SAFE_INTEGER / 60_000)`.
+Missing or invalid estimates reject the complete document. PHASE scopes only
+immediately following ADD lines, not status selectors; empty phase blocks are
+invalid. INIT without a first PHASE uses `"Tasks"`. Titles and initialization
+phase names must be unique. `"ALL"` is a title, whereas bare `ALL` is a selector.
+
+ANSI and native call cards preview completed command lines and the unfinished
+tail as uncommitted intent. Generating or canceling a prefix never writes Todo
+state. The executor reads the current branch, strictly validates the complete
+document, applies logical operations in order to a working copy, and commits
+once. A syntax, target or rule error rejects the entire batch.
+
+Logical task operations retain progress normalization and `transitionTime`.
+All transitions in one accepted batch share one wall-clock anchor, so a task
+that is only temporarily active within the working copy accrues no artificial
+command-processing time. GOAL and VIEW do not normalize or change task clocks.
+
+An empty list carries no goal. Put GOAL first when an imported list lacks one.
+RM ALL or removing the last task drops the goal in the working copy; later
+additions cannot inherit it. Use INIT to create the next list.
+
+The current session branch is the only authority. A successful changing batch
+appends one complete `mouriya.omp.todo-more` snapshot and updates the host
+TodoTracker projection once. Results retain `todoMore: true`, `details.more`,
+native-compatible phases, storage and completion transitions.
+`details.op` identifies the operation or `"batch"`; `details.operations`
+lists operation names. Only successful mutations return `details.changes`,
+the ordered structured operations actually applied, including ADD budgets and
+ESTIMATE values. VIEW and rejected calls do not emit accepted changes.
 
 The reader joins the host's `user_todo_edit` entries and old native tool
 results by title: known titles keep their explanation and timing metadata;
@@ -65,10 +126,10 @@ how the normal persistence path is verified.
 
 ### Estimates and overtime warnings
 
-`estimate {task, estimatedMinutes}` supplies or revises an item's total time
-budget. Old snapshots and native-created items have `time.kind: "missing"`;
-the model must explicitly estimate them rather than invent historical time.
-The first estimate starts at the estimate call if the item is already active.
+`ESTIMATE "title" minutes` supplies or revises an item's total time budget.
+Old snapshots and native-created items have `time.kind: "missing"`; the model
+must explicitly estimate them rather than invent historical time. The first
+estimate starts at the accepted batch's anchor if the item is already active.
 
 | Item transition | Clock behavior |
 |---|---|
@@ -124,8 +185,8 @@ mid-run nudges, the eager prelude, goal-mode context and request-only user
 reminders are kept. A human interruption is not resumed automatically.
 
 The planning guard reads the current branch when an edit actually executes,
-not when the tool batch is pre-checked; an `init`/edit or `rm`/edit in the
-same batch is therefore checked against the list at execution time.
+not when the tool batch is pre-checked; a Todo INIT/edit or RM/edit sequence
+therefore uses the accepted document's state at edit execution time.
 
 ## Read-only review protocol
 
@@ -151,14 +212,14 @@ exports no internal reader. The listener is removed on the instance's
 
 A completion judge should request once before building the model prompt and
 again after the model returns, before checking `openItems`; when unavailable
-it keeps its warning + fail-open behavior. The ctx log records historical
-goal-sets only from `input.goal` of successful tool results and is not the
-authority for the current Todo.
+it keeps its warning + fail-open behavior. The ctx history consumer records
+accepted logical operations from successful `details.changes`, including each
+explicit goal replacement; it is not the current Todo state.
 
 ## Editing and commits
 
 The GUI has only two edit intents, `set_goal` and `explain` by complete title;
-it adds no model tool operation. Saving re-reads the target session's current
+it does not generate model tool calls. Saving re-reads the target session's current
 branch and overwrites only the target field; the task's latest
 phase/status/blocker/order, time budget and clock, and every other field are kept. An empty list
 rejects edits, a missing goal must be set first, and a deleted or renamed task
@@ -192,8 +253,8 @@ disclosure and removes its input listener.
 
 The native-sized Todo wrapper contains the disclosure and its sibling rich
 popover. Hovering the popover therefore does not highlight the pill. The
-popover follows the original `.sf-ck-pop` positioning: right-aligned, above the pill with an 8px
-gap, a 360px width, 420px maximum height and 12px/14px padding. It also retains
+popover follows the original `.sf-ck-pop` positioning: right-aligned, above
+the pill with an 8px gap, a 360px width, 420px maximum height and 12px/14px padding. It also retains
 the native conditional clearance for a preceding HUD row, glass, shadow and
 motion. The popover itself is the only scroll area; the inner details keep
 their natural height, so content exceeding the native ceiling scrolls from
@@ -211,13 +272,15 @@ checklist presentation. Historical tool cards render their own `details.more`;
 reminders keep the snapshot from their own event. Neither becomes an edit
 source or changes when the current list is edited.
 
-In Tern, `/todo` and `/todo edit` open the rich `/todo-more` editor.
+In Tern's main-session composer, `/todo` and `/todo edit` open the rich
+`/todo-more` editor. A focused child view keeps the host's slash-command
+restrictions; its popover's Edit button opens that child's rich editor.
 Other `/todo` subcommands, including `expand` and `collapse`, retain their
 host behavior; Todo More's native disclosure head controls its rich popover.
 Task changes are joined by title as described above. Plain ANSI OMP keeps
 the host command and HUD; the replacement widget emits no ANSI rows.
 
-`/todo-more` opens the current session's editing overlay in OMP or Tern.
+`/todo-more` opens the main-session editor in OMP or Tern.
 Tab/Shift+Tab or the up/down arrows select an action, the current action is
 marked in the accent color, and Enter opens it. When a task is deleted, the
 selection settles on the current list. The progress popover's edit button
@@ -256,8 +319,8 @@ The current OMP native dock has thirteen source slots. A CSS grid adapter
 preserves those slots and places Todo More in the existing activity track;
 other below-editor widgets remain in normal order. The popover is an
 absolutely positioned sibling of the disclosure inside its native-sized
-Todo wrapper, not a separate layer with an anchor or allocation canvas. The adapter also preserves the
-original conditional HUD clearance, skin variables and Spine's widget
+Todo wrapper, not a separate layer with an anchor or allocation canvas. The
+adapter also preserves original conditional HUD clearance, skin variables and Spine's widget
 spacing, padding and background band. It depends on OMP's dock topology and
 Tern's checklist visuals and card head/body structure: upgrades must re-check
 geometry, focus, other widgets and live theme switching.

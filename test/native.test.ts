@@ -127,7 +127,7 @@ describe("native todo presentation", () => {
 						{
 							text: "Plan the replacement",
 							status: "pending",
-							note: "(no time estimate yet: add one with op estimate)\nExplanation: Keep the host projection",
+							note: expect.stringContaining("Explanation: Keep the host projection"),
 						},
 						{
 							text: "Implement the card",
@@ -147,7 +147,7 @@ describe("native todo presentation", () => {
 						{
 							text: "Old approach",
 							status: "dropped",
-							note: "(no time estimate yet: add one with op estimate)\nExplanation: No longer needed",
+							note: expect.stringContaining("Explanation: No longer needed"),
 						},
 						{
 							text: "Check runtime",
@@ -180,9 +180,12 @@ describe("native todo presentation", () => {
 			{
 				text: "Imported task",
 				status: "pending",
-				note: "(no time estimate yet: add one with op estimate)\nExplanation: [explanation missing]",
+				note: expect.stringContaining("Explanation: [explanation missing]"),
 			},
 		]);
+		const note = only(checklist(body).phases.flatMap((phase) => phase.items)).note;
+		expect(note).toMatch(/no time estimate/i);
+		expect(note).not.toMatch(/Estimate:\s*\d/);
 	});
 });
 
