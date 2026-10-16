@@ -418,22 +418,33 @@ function viewedSession(tui: TUI, mainAgentId: string): AgentSession | undefined 
 	const viewedAgentId = editor.composerState().viewing?.at(-1) ?? mainAgentId;
 	return AgentRegistry.global().get(viewedAgentId)?.session ?? undefined;
 }
+type HudDisclosure = { kind: "closed" } | { kind: "open"; session: AgentSession; stopInput: () => void };
 
 /** Native-only presentation; the branch remains its only Todo state. */
 class TodoHud implements Component {
+	private disclosure: HudDisclosure = { kind: "closed" };
+
 	constructor(
 		private readonly pi: ExtensionAPI,
 		private readonly readSession: () => AgentSession | undefined,
 		private readonly open: () => Promise<void>,
+		private readonly tui: TUI,
+		private readonly onDispose: () => void,
 	) {}
 
 	describe(): NativeNode | null {
 		try {
 			const session = this.readSession();
-			const described = session === undefined ? null : describeTodoHud(toSnapshot(readTodoMore(session.sessionManager.getBranch())));
+			if (this.disclosure.kind === "open" && this.disclosure.session !== session) this.closeDisclosure();
+			const described =
+				session === undefined
+					? null
+					: describeTodoHud(toSnapshot(readTodoMore(session.sessionManager.getBranch())), this.disclosure.kind === "open");
+			if (described === null) this.closeDisclosure();
 			// Keep our own slot identifiable when empty, without showing a pill.
 			return described ?? node("row", { role: "omp.hud.activity", aria: "Todo More progress", hidden: true });
 		} catch (error) {
+			this.closeDisclosure();
 			this.pi.logger.warn("todo-more HUD could not read the current branch", { error: errorText(error) });
 			return null;
 		}
@@ -443,14 +454,48 @@ class TodoHud implements Component {
 		return NO_ANSI_HUD_ROWS;
 	}
 
+	closeDisclosure(): void {
+		if (this.disclosure.kind === "closed") return;
+		this.disclosure.stopInput();
+		this.disclosure = { kind: "closed" };
+	}
+
 	handleNativeEvent(event: NativeUiEvent): void {
-		if (event.type === "action" && event.act === "todo-more.open") void this.open();
+		if (event.type === "toggle" && event.key === "pill/control") {
+			this.closeDisclosure();
+			if (!event.collapsed) {
+				const session = this.readSession();
+				if (session === undefined) return;
+				const stopInput = this.tui.addInputListener((data) => {
+					if (this.disclosure.kind === "closed") return;
+					if (this.readSession() !== this.disclosure.session) {
+						this.closeDisclosure();
+						this.tui.requestRender();
+						return;
+					}
+					if (!matchesKey(data, "escape")) return;
+					this.closeDisclosure();
+					this.tui.requestRender();
+					return { consume: true };
+				});
+				this.disclosure = { kind: "open", session, stopInput };
+			}
+			this.tui.requestRender();
+		} else if (event.type === "action" && event.act === "todo-more.open") {
+			void this.open();
+		}
+	}
+
+	dispose(): void {
+		this.closeDisclosure();
+		this.onDispose();
 	}
 }
 
 export function registerUi(pi: ExtensionAPI): void {
 	let active: { controller: AbortController; session: AgentSession } | undefined;
 	let hudTui: TUI | undefined;
+	let hud: TodoHud | undefined;
 	const cancel = (): void => {
 		active?.controller.abort();
 		active = undefined;
@@ -470,6 +515,8 @@ export function registerUi(pi: ExtensionAPI): void {
 			});
 			return;
 		}
+		hud?.closeDisclosure();
+		hudTui?.requestRender();
 		const session = hudTui === undefined ? undefined : currentSession(hudTui, ctx.agent.id);
 		if (session == null || active) return;
 		const opened = { controller: new AbortController(), session };
@@ -507,11 +554,20 @@ export function registerUi(pi: ExtensionAPI): void {
 				? undefined
 				: (tui) => {
 						hudTui = tui;
-						return new TodoHud(
+						const widget: TodoHud = new TodoHud(
 							pi,
 							() => currentSession(tui, ctx.agent.id),
 							() => open(ctx),
+							tui,
+							() => {
+								if (hud === widget) {
+									hud = undefined;
+									hudTui = undefined;
+								}
+							},
 						);
+						hud = widget;
+						return widget;
 					},
 			{ placement: "belowEditor" },
 		);

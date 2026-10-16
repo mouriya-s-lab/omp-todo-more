@@ -174,32 +174,37 @@ repair an earlier partial projection failure. `view` stays a pure read.
 
 ## Native display and editing
 
-In Tern, Todo More uses the terminal's actual `checklist` HUD pill, not a
-restyled card. The checklist is a direct child of the native activity row,
-with the original `omp.hud.todo` role; Tern owns its intrinsic sizing,
-long-title truncation, ring, typography and hover treatment. Clicking it
-renders Objective, Measure, Done when, every phase/task, all five statuses,
-time estimates, explanations and blockers. Goal fields are not fake tasks
-and do not affect progress; blocked tasks show both their explanation and blocker.
+In Tern, Todo More keeps the terminal's actual `checklist` HUD as the
+visual source for the pill, ring, title, count, typography and skin treatment.
+The replacement occupies the original native activity track and retains its
+`omp.hud.todo` sizing and alignment. Objective, Measure, Done when, every
+phase/task, all five statuses, time estimates, explanations and blockers
+remain separate rich content; goal fields are not fake tasks and do not
+affect progress.
 
-The rich popover is one height-bounded scrolling panel. When the content
-does not fit, scroll inside the panel from the goal fields to the final
-task and the edit button, or back to the top. The height limit includes
-the outer padding; the inner details keep their full content height
-instead of creating a second scroll area or shrinking away the overflow.
-The panel opens below the pill in every window, at most six terminal line
-heights tall including padding. It overlays part of the composer while open;
-click the exposed native pill to close it and uncover the input. Keeping the
-scroll container in that reserved area also accommodates a growing multiline
-composer without guessing how much space remains above the pill.
-Its themed glass backdrop blurs the covered composer so the input text does
-not show through the Todo details.
+A native bare-card disclosure head is the sole interactive control. Its
+native toggle event and controlled `collapsed` prop drive one session-bound
+disclosure state. The visual-only checklist's button stays hidden and
+unfocusable; only its noninteractive ring, title and count are drawn. Its
+terminal-local HUD popover is never activated. Escape, opening the editor,
+an empty list, a viewed-session change or widget disposal closes the rich
+disclosure and removes its input listener.
 
-Tern owns the disclosure state and theme. Appearance changes, named theme
-changes and the selected program-palette variant apply through the native
-renderer and inherited variables, including while the rich popover is open.
-The plugin stores no theme or open-state copy and sets no pill width,
-font, padding or color.
+The native-sized Todo wrapper contains the disclosure and its sibling rich
+popover. Hovering the popover therefore does not highlight the pill. The
+popover follows the original `.sf-ck-pop` positioning: right-aligned, above the pill with an 8px
+gap, a 360px width, 420px maximum height and 12px/14px padding. It also retains
+the native conditional clearance for a preceding HUD row, glass, shadow and
+motion. The popover itself is the only scroll area; the inner details keep
+their natural height, so content exceeding the native ceiling scrolls from
+the goal fields through the final task and edit button. There is no generic
+portal, direction flip, below-pill tray or independent viewport/composer
+height calculation.
+
+Appearance changes, named themes and the selected program-palette variant
+apply through the native renderer and inherited variables, including while
+the popover is open. The plugin stores no theme copy and retains native pill
+sizing and typography rather than freezing theme colors or font metrics.
 
 Native tool cards and reminder notices use the same goal fields and native
 checklist presentation. Historical tool cards render their own `details.more`;
@@ -208,7 +213,7 @@ source or changes when the current list is edited.
 
 In Tern, `/todo` and `/todo edit` open the rich `/todo-more` editor.
 Other `/todo` subcommands, including `expand` and `collapse`, retain their
-host behavior; the native pill's own click controls its disclosure.
+host behavior; Todo More's native disclosure head controls its rich popover.
 Task changes are joined by title as described above. Plain ANSI OMP keeps
 the host command and HUD; the replacement widget emits no ANSI rows.
 
@@ -241,21 +246,22 @@ reports that it is unavailable and leaves the Todo unchanged.
 ## Tern asset lifecycle
 
 The package ships `tern/plugin.toml`, `todo-more.css` and `window.luau`.
-OMP native components provide the native pill, full checklist and editing;
-the window entry satisfies the stylesheet manifest contract and does not
-create another state store or editor. The stylesheet only changes the
+OMP native components provide the pill visuals, disclosure, full checklist
+and editing; the window entry satisfies the stylesheet manifest contract
+and creates no domain-state store or editor. The stylesheet only changes the
 `omp.session` surface. It makes the original Todo invisible but retains its
 layout box and real host projection.
 
 The current OMP native dock has thirteen source slots. A CSS grid adapter
 preserves those slots and places Todo More in the existing activity track;
-other below-editor widgets remain in normal order. Tern's native pill owns
-its size and theme. A sibling rich body follows its native `.open` state,
-replacing only its built-in list popover so the global goal remains separate
-from tasks. This adapter depends on OMP's dock topology, the native activity
-track and Tern's `.sf-ck-pop` structure: upgrades must re-check geometry,
-other widgets and live theme switching. Neither host source nor binaries
-are patched.
+other below-editor widgets remain in normal order. The popover is an
+absolutely positioned sibling of the disclosure inside its native-sized
+Todo wrapper, not a separate layer with an anchor or allocation canvas. The adapter also preserves the
+original conditional HUD clearance, skin variables and Spine's widget
+spacing, padding and background band. It depends on OMP's dock topology and
+Tern's checklist visuals and card head/body structure: upgrades must re-check
+geometry, focus, other widgets and live theme switching.
+Neither host source nor binaries are patched.
 
 The Tern stylesheet and OMP extension must be enabled together. The
 stylesheet hides the native HUD while the Tern plugin is enabled, including

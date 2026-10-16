@@ -87,34 +87,84 @@ export function describeSnapshot(snapshot: TodoMoreSnapshot, editable = false, s
 	return body;
 }
 
-/** Tern owns the native pill, intrinsic size, palette and local disclosure state. */
-export function describeTodoHud(snapshot: TodoMoreSnapshot): NativeNode | null {
-	if (snapshot.phases.every((phase) => phase.items.length === 0)) return null;
+/** Tern draws the pill; the plugin owns its accessible trigger and anchored rich disclosure. */
+export function describeTodoHud(snapshot: TodoMoreSnapshot, expanded = false): NativeNode | null {
+	let total = 0;
+	let closed = 0;
+	let active: string | undefined;
+	let pending: string | undefined;
+	for (const phase of snapshot.phases) {
+		for (const item of phase.items) {
+			total++;
+			switch (item.status) {
+				case "completed":
+				case "abandoned":
+					closed++;
+					break;
+				case "in_progress":
+					active ??= item.title;
+					break;
+				case "pending":
+					pending ??= item.title;
+					break;
+				case "blocked":
+					break;
+				default: {
+					const unreachable: never = item.status;
+					throw new Error(`Unexpected todo status: ${String(unreachable)}`);
+				}
+			}
+		}
+	}
+	if (total === 0) return null;
+	const label = active ?? pending ?? (closed === total ? "All done" : "Todos");
 	return node(
 		"row",
 		{ role: "omp.hud.activity", aria: "Todo More progress", align: "center", gap: "sm" },
 		[
-			node("checklist", { role: "omp.hud.todo", mode: "hud", phases: checklistPhases(snapshot) }, undefined, "trigger"),
 			node(
 				"col",
-				{ role: "omp.hud.todo", aria: "Todo More popover" },
+				{ role: "omp.hud.todo", aria: "Todo More pill", gap: "none" },
 				[
 					node(
-						"col",
-						{ role: "todo-more.details", gap: "sm" },
-						[
-							...describeSnapshot(snapshot),
-							node(
-								"row",
-								{ role: "omp.btn", actions: { click: "todo-more.open" } },
-								[node("text", { text: "Edit goal / explanations" })],
-								"edit",
-							),
-						],
-						"details",
+						"card",
+						{
+							aria: "Todo More disclosure",
+							head: `${label} ${closed}/${total}`,
+							variant: "bare",
+							collapsible: true,
+							collapsed: !expanded,
+						},
+						[node("checklist", { role: "todo-more.visual", mode: "hud", phases: checklistPhases(snapshot) }, undefined, "visual")],
+						"control",
 					),
+					...(expanded
+						? [
+								node(
+									"col",
+									{ role: "todo-more.popover", aria: "Todo More popover" },
+									[
+										node(
+											"col",
+											{ role: "todo-more.details", gap: "sm" },
+											[
+												...describeSnapshot(snapshot),
+												node(
+													"row",
+													{ role: "omp.btn", actions: { click: "todo-more.open" } },
+													[node("text", { text: "Edit goal / explanations" })],
+													"edit",
+												),
+											],
+											"details",
+										),
+									],
+									"popover",
+								),
+							]
+						: []),
 				],
-				"popover",
+				"pill",
 			),
 		],
 		"todo-more.hud",

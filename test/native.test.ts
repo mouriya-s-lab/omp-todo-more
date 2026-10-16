@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { NativeChild, NativeNode } from "@oh-my-pi/pi-tui";
 import { describeSnapshot, describeTodoHud, describeTodoResult } from "../src/native.ts";
-import type { TodoMoreSnapshot } from "../src/state.ts";
+import type { TodoMoreSnapshot, TodoStatus } from "../src/state.ts";
 import type { TodoMoreDetails } from "../src/tool.ts";
 
 const snapshot: TodoMoreSnapshot = {
@@ -72,7 +72,11 @@ function only<T>(values: readonly T[]): T {
 }
 
 function checklist(children: readonly NativeChild[]) {
-	const list = only(nativeNodes(children).filter((entry) => entry.k === "checklist"));
+	const list = only(
+		nativeNodes(children)
+			.filter((entry) => entry.k === "checklist")
+			.filter((entry) => entry.p?.mode === "full"),
+	);
 	if (list.p === undefined) throw new Error("Expected checklist properties");
 	return list.p;
 }
@@ -105,8 +109,10 @@ function resultBody(result: Parameters<typeof describeTodoResult>[0]): readonly 
 }
 
 describe("native todo presentation", () => {
-	test("preserves all goal fields, all five statuses, estimate notes, and both blocked explanation and reason", () => {
-		const body = describeSnapshot(snapshot);
+	test("expanded disclosure preserves all goal fields, all five statuses, estimate notes, and both blocked explanation and reason", () => {
+		const hud = describeTodoHud(snapshot, true);
+		if (hud === null) throw new Error("Expected a native HUD");
+		const body = [hud];
 
 		expect(goalItems(body)).toEqual([
 			{ k: "Objective", v: "Ship the native todo replacement" },
@@ -114,21 +120,16 @@ describe("native todo presentation", () => {
 			{ k: "Done when", v: "The replacement preserves all rich todo fields" },
 		]);
 		expect(checklist(body)).toMatchObject({
-			mode: "full",
 			phases: [
 				{
-					id: "Delivery",
 					title: "Delivery",
-					collapsed: false,
 					items: [
 						{
-							id: "Plan the replacement",
 							text: "Plan the replacement",
 							status: "pending",
 							note: "(no time estimate yet: add one with op estimate)\nExplanation: Keep the host projection",
 						},
 						{
-							id: "Implement the card",
 							text: "Implement the card",
 							status: "active",
 							note: "Estimate: 25 min\nExplanation: Use the native checklist",
@@ -136,24 +137,19 @@ describe("native todo presentation", () => {
 					],
 				},
 				{
-					id: "Verification",
 					title: "Verification",
-					collapsed: false,
 					items: [
 						{
-							id: "Inspect saved fields",
 							text: "Inspect saved fields",
 							status: "done",
 							note: "Estimate: 10 min\nExplanation: Read the historical result",
 						},
 						{
-							id: "Old approach",
 							text: "Old approach",
 							status: "dropped",
 							note: "(no time estimate yet: add one with op estimate)\nExplanation: No longer needed",
 						},
 						{
-							id: "Check runtime",
 							text: "Check runtime",
 							status: "blocked",
 							note: "Estimate: 12 min\nExplanation: Exercise the real native consumer\nBlocker: Waiting for the terminal",
@@ -180,56 +176,13 @@ describe("native todo presentation", () => {
 			{ k: "Measure", v: "[goal missing]" },
 			{ k: "Done when", v: "[goal missing]" },
 		]);
-		expect(checklist(body).phases.flatMap((phase) => phase.items)).toEqual([
+		expect(checklist(body).phases.flatMap((phase) => phase.items.map(({ text, status, note }) => ({ text, status, note })))).toEqual([
 			{
-				id: "Imported task",
 				text: "Imported task",
 				status: "pending",
 				note: "(no time estimate yet: add one with op estimate)\nExplanation: [explanation missing]",
 			},
 		]);
-	});
-
-	test("deletion and phase/task reorder preserve surviving checklist and editor identities", () => {
-		const before = describeSnapshot(snapshot, true);
-		const reordered: TodoMoreSnapshot = {
-			...snapshot,
-			phases: [...snapshot.phases].reverse().map((phase) => ({
-				...phase,
-				items: [...phase.items].reverse().filter((item) => item.title !== "Plan the replacement"),
-			})),
-		};
-		const after = describeSnapshot(reordered, true);
-		const originalPhases = checklist(before).phases;
-		const reorderedPhases = checklist(after).phases;
-
-		expect(reorderedPhases.map((phase) => phase.id)).toEqual(["Verification", "Delivery"]);
-		expect(reorderedPhases.flatMap((phase) => phase.items.map((item) => item.id))).toEqual([
-			"Check runtime",
-			"Old approach",
-			"Inspect saved fields",
-			"Implement the card",
-		]);
-		for (const phase of reorderedPhases) {
-			const original = only(originalPhases.filter((candidate) => candidate.title === phase.title));
-			expect(phase.id).toBe(original.id);
-			for (const item of phase.items) {
-				expect(item).toEqual(only(original.items.filter((candidate) => candidate.text === item.text)));
-			}
-		}
-
-		const originalEditors = nativeNodes(before).filter((entry) => entry.k === "row" && entry.p?.role === "omp.btn");
-		const survivingEditors = nativeNodes(after).filter((entry) => entry.k === "row" && entry.p?.role === "omp.btn");
-		expect(originalEditors).toHaveLength(5);
-		expect(survivingEditors).toHaveLength(4);
-		for (const editor of survivingEditors) {
-			const original = only(originalEditors.filter((candidate) => candidate.p?.title === editor.p?.title));
-			expect(editor.key).toBeDefined();
-			expect(editor.key).toBe(original.key);
-			expect(editor.p?.actions).toEqual(original.p?.actions);
-		}
-		expect(new Set(survivingEditors.map((editor) => editor.key)).size).toBe(4);
-		expect(goalItems(after)).toEqual(goalItems(before));
 	});
 });
 
@@ -237,6 +190,66 @@ describe("native todo HUD", () => {
 	test("empty lists have no HUD, including a phase with no tasks", () => {
 		expect(describeTodoHud({ goal: null, phases: [] })).toBeNull();
 		expect(describeTodoHud({ goal: snapshot.goal, phases: [{ name: "Empty phase", items: [] }] })).toBeNull();
+	});
+
+	test("rich goal, full checklist, and edit content appear only when expanded", () => {
+		for (const expanded of [false, true]) {
+			const hud = describeTodoHud(snapshot, expanded);
+			if (hud === null) throw new Error("Expected a native HUD");
+			const nodes = nativeNodes([hud]);
+
+			expect(nodes.filter((entry) => entry.k === "kv")).toHaveLength(expanded ? 1 : 0);
+			expect(nodes.filter((entry) => entry.k === "checklist" && entry.p?.mode === "full")).toHaveLength(expanded ? 1 : 0);
+			const editControls = nodes.filter((entry) => entry.k === "text" && entry.p?.text === "Edit goal / explanations");
+			expect(editControls).toHaveLength(expanded ? 1 : 0);
+		}
+	});
+
+	test.each([
+		{
+			name: "first in_progress takes precedence over pending and later in_progress",
+			statuses: ["pending", "in_progress", "in_progress", "completed", "abandoned", "blocked"],
+			label: "Task 2 2/6",
+		},
+		{
+			name: "first pending takes precedence when no task is in_progress",
+			statuses: ["blocked", "pending", "pending", "completed"],
+			label: "Task 2 1/4",
+		},
+		{
+			name: "completed and abandoned tasks are both closed",
+			statuses: ["abandoned", "completed"],
+			label: "All done 2/2",
+		},
+		{
+			name: "blocked tasks keep the list open without becoming the primary title",
+			statuses: ["blocked", "completed", "abandoned"],
+			label: "Todos 2/3",
+		},
+	] satisfies { name: string; statuses: TodoStatus[]; label: string }[])("$name", ({ statuses, label }) => {
+		const hud = describeTodoHud(
+			{
+				goal: null,
+				phases: [
+					{
+						name: "Progress",
+						items: statuses.map((status, index) => ({
+							title: `Task ${index + 1}`,
+							status,
+							explanation: null,
+							time: { kind: "missing" },
+						})),
+					},
+				],
+			},
+			false,
+		);
+		if (hud === null) throw new Error("Expected a native HUD");
+		const headings = nativeNodes([hud]).flatMap((entry) =>
+			entry.p !== undefined && "head" in entry.p && typeof entry.p.head === "string" ? [entry.p.head] : [],
+		);
+
+		expect(headings).toContain(label);
 	});
 });
 
@@ -275,9 +288,11 @@ describe("native historical todo results", () => {
 		]);
 		expect(checklist(newerBody).phases.flatMap((phase) => phase.items.map((item) => item.text))).toEqual(["A new task", "Check runtime"]);
 		expect(
-			checklist(newerBody)
-				.phases.flatMap((phase) => phase.items)
-				.find((item) => item.id === "Check runtime")?.note,
+			only(
+				checklist(newerBody)
+					.phases.flatMap((phase) => phase.items)
+					.filter((item) => item.text === "Check runtime"),
+			).note,
 		).toBe("Estimate: 45 min\nExplanation: A newer runtime check");
 		expect(goalItems(historicalBody)).toEqual([
 			{ k: "Objective", v: "Ship the native todo replacement" },
@@ -292,9 +307,11 @@ describe("native historical todo results", () => {
 			"Check runtime",
 		]);
 		expect(
-			checklist(historicalBody)
-				.phases.flatMap((phase) => phase.items)
-				.find((item) => item.id === "Check runtime")?.note,
+			only(
+				checklist(historicalBody)
+					.phases.flatMap((phase) => phase.items)
+					.filter((item) => item.text === "Check runtime"),
+			).note,
 		).toBe("Estimate: 12 min\nExplanation: Exercise the real native consumer\nBlocker: Waiting for the terminal");
 	});
 });

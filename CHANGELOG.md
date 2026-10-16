@@ -2,10 +2,10 @@
 
 ## Unreleased
 
-- Used Tern's actual checklist HUD directly in the native activity track, retaining native sizing, long-title truncation, disclosure and live theme switching. Placed the rich popover below the pill with a bounded outer height and one scroll area, so a growing composer cannot push its goal fields above the viewport and the details are not compressed to hide overflow.
-- Applied the themed glass backdrop to the scroll tray so covered composer text does not bleed through the Todo fields.
+- Retained Tern's actual checklist HUD visuals in the native activity track, preserving pill sizing, long-title truncation, ring, typography and live theme switching. Used one supported native-card disclosure control with session-bound state instead of duplicating the checklist's local open state.
+- Restored the original above-pill positioning, 360px width, 420px maximum height, internal scrolling, popup material and motion in a native-sized Todo wrapper. Kept the popup beside the disclosure so pill hover follows the trigger without leaking into popup interactions. Removed the generic portal, height-allocation canvas, direction-flip path and below-pill tray. Preserved Spine's native widget spacing, padding and background band through the dock adapter.
 - Unified native tool results, progress details and reminder snapshots around goal fields and the native checklist, preserving explanations alongside blockers and keeping real task counts.
-- Routed Tern's `/todo` and `/todo edit` to the rich editor while preserving other host subcommands and the ANSI HUD; native pill disclosure remains terminal-owned.
+- Routed Tern's `/todo` and `/todo edit` to the rich editor while preserving other host subcommands and the ANSI HUD; every editor entry closes the session-bound progress disclosure before opening the editor.
 - Followed the host composer's live viewed-agent lineage for child/nested-session progress and edits; commits append through the target session's own manager rather than an extension-bound main-session writer.
 - Shared the domain snapshot schema directly across persisted, tool-result and reminder boundaries so packaged extensions load on the managed OMP runtime without schema introspection.
 - Require a model-provided positive integer `estimatedMinutes` for every new Todo item, reject fractions without rounding, and add `estimate` to supply or revise budgets without erasing elapsed work.
