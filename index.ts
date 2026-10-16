@@ -10,6 +10,11 @@
  * Registers the tool `todo` (tool.ts, rendered by render.ts) and the hooks of
  * reminders.ts (stop reminder, mid-run nudge, eager prelude, goal-mode
  * context), plus `before_agent_start` to give `task:*` subagents the tool.
+ *
+ * Also registers `ctx` (src/ctx/index.ts): the read-only context tool and its
+ * post-compaction hint. src/ctx/tasklog.ts appends each successful `todo` / `goal`
+ * change to the task log, which `ctx` replays into the work record.
+ *
  * planning.ts wraps the registered `edit` execution so an empty list blocks
  * it (installed on session_start, before_agent_start and edit tool_call), and
  * appends a complete plan-check reminder to each real user message (`context`,
@@ -43,6 +48,8 @@ import type { AgentTool } from "@oh-my-pi/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import { registerCtx } from "./src/ctx/index.ts";
+import { registerCtxTasklog } from "./src/ctx/tasklog.ts";
 import { errorText } from "./src/errors.ts";
 import { describeTodoCall, describeTodoResult } from "./src/native.ts";
 import { registerOvertime } from "./src/overtime.ts";
@@ -134,4 +141,6 @@ export default async function todoMore(pi: ExtensionAPI): Promise<void> {
 	registerPlanning(pi);
 	registerReviewApi(pi);
 	registerUi(pi);
+	registerCtx(pi);
+	registerCtxTasklog(pi);
 }
