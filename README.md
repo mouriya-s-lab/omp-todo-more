@@ -89,10 +89,13 @@ invalid. INIT without a first PHASE uses `"Tasks"`. Titles and initialization
 phase names must be unique. `"ALL"` is a title, whereas bare `ALL` is a selector.
 
 ANSI and native call cards preview completed command lines and the unfinished
-tail as uncommitted intent. Generating or canceling a prefix never writes Todo
-state. The executor reads the current branch, strictly validates the complete
-document, applies logical operations in order to a working copy, and commits
-once. A syntax, target or rule error rejects the entire batch.
+tail as uncommitted intent. A card is the call's pending view: the result view
+replaces it once the execution returns, so one call paints one card and the
+preview never stacks above the list it previews. Generating or canceling a
+prefix never writes Todo state. The executor reads the current branch, strictly
+validates the complete document, applies logical operations in order to a
+working copy, and commits once. A syntax, target or rule error rejects the
+entire batch.
 
 Logical task operations retain progress normalization and `transitionTime`.
 All transitions in one accepted batch share one wall-clock anchor, so a task

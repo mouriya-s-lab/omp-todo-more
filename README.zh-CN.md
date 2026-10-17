@@ -68,7 +68,7 @@ ADD "检查任务历史" "确认已接受操作的顺序" 5
 
 每个 ADD 必须由模型提供正整数分钟估计，不默认、不取整；最大为 `Math.floor(Number.MAX_SAFE_INTEGER / 60_000)`。缺失或非法估计拒绝整份文档。PHASE 只作用于紧随的 ADD，不限定状态命令；空阶段块无效。INIT 的首个 ADD 没有 PHASE 时使用 `"Tasks"`。任务 title 和初始化中的 phase 名必须唯一。`"ALL"` 是标题，裸 `ALL` 才是 selector。
 
-ANSI 与 native 调用卡片将完整命令行和未完成末行显示为未提交预览。生成或取消前缀都不改变 Todo。执行读取当前分支，严格解析完整文档，在 working copy 按顺序应用逻辑操作，最后一次提交；语法、目标或规则错误拒绝整批。
+ANSI 与 native 调用卡片将完整命令行和未完成末行显示为未提交预览。卡片是这次调用的 pending 视图：执行结果返回后由结果视图替换它，因此一次调用只画一张卡片，预览不会叠在它所预览的列表之上。生成或取消前缀都不改变 Todo。执行读取当前分支，严格解析完整文档，在 working copy 按顺序应用逻辑操作，最后一次提交；语法、目标或规则错误拒绝整批。
 
 任务操作保留 progress normalize 和 `transitionTime`。同一接受批次中的状态转换共享一个墙钟锚点，只在 working copy 短暂 active 的任务不累计虚假的命令处理耗时；GOAL 与 VIEW 不 normalize 或改变任务时钟。
 

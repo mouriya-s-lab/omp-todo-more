@@ -47,7 +47,7 @@
  * the TodoTracker projection. No config files. Hook failures are logged and
  * never reach omp.
  */
-import type { AgentTool } from "@oh-my-pi/pi-agent-core";
+import type { AgentTool, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
@@ -61,7 +61,7 @@ import { registerReminders } from "./src/reminders.ts";
 import { renderTodoCall, renderTodoResult } from "./src/render.ts";
 import { registerReviewApi } from "./src/review-api.ts";
 import { initializeTernPlugin } from "./src/tern-plugin-install.ts";
-import { customFormat, DESCRIPTION, parametersSchema, runTodo } from "./src/tool.ts";
+import { customFormat, DESCRIPTION, parametersSchema, runTodo, type TodoMoreDetails } from "./src/tool.ts";
 import { registerUi } from "./src/ui.ts";
 
 const TOOL_NAME = "todo";
@@ -87,6 +87,9 @@ const TOOL_FIELDS = {
 	// The host proxies extension fields, including edit-style customFormat, unchanged.
 	// Serialize complete batches; partial arguments are display-only intent.
 	concurrency: "exclusive" as const,
+	// The result card replaces the call card once a result exists: the streaming
+	// preview is a pending-only view, never a second body above the same list.
+	mergeCallAndResult: true,
 	describeCall: describeTodoCall,
 	describeResult: describeTodoResult,
 };
@@ -118,18 +121,27 @@ async function installForTask(ctx: ExtensionContext): Promise<void> {
 	await session.refreshRpcHostTools([hostTool as unknown as AgentTool]);
 }
 
+/** The registered `todo` tool: shared fields, native describe hooks, ANSI renderers and the merge flag. */
+export const TODO_TOOL_DEFINITION = {
+	...TOOL_FIELDS,
+	execute: async (
+		_toolCallId: string,
+		params: unknown,
+		_signal: AbortSignal | undefined,
+		_onUpdate: AgentToolUpdateCallback<TodoMoreDetails> | undefined,
+		ctx: ExtensionContext,
+	) => {
+		const session = ownSession(ctx);
+		if (session === undefined) throw new Error(`todo: no session registered for agent ${ctx.agent.id}`);
+		return runTodo(session, params);
+	},
+	renderCall: renderTodoCall,
+	renderResult: renderTodoResult,
+};
+
 export default async function todoMore(pi: ExtensionAPI): Promise<void> {
 	await initializeTernPlugin();
-	pi.registerTool({
-		...TOOL_FIELDS,
-		execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
-			const session = ownSession(ctx);
-			if (session === undefined) throw new Error(`todo: no session registered for agent ${ctx.agent.id}`);
-			return runTodo(session, params);
-		},
-		renderCall: renderTodoCall,
-		renderResult: renderTodoResult,
-	});
+	pi.registerTool(TODO_TOOL_DEFINITION);
 
 	pi.on("before_agent_start", async (_event, ctx) => {
 		try {
