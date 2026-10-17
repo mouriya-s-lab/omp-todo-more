@@ -1,7 +1,7 @@
 import type { ToolDefinition } from "@oh-my-pi/pi-coding-agent";
 import { type NativeChild, type NativeNode, node, stableKey } from "@oh-my-pi/pi-tui";
 import type { parametersSchema } from "./protocol.ts";
-import { callPreviewLines, compactTodoLabel, detailsSchema, isClosed, parseCall } from "./render.ts";
+import { callPreviewLines, compactTodoLabel, detailsSchema, isClosed, parseCall, progressCounts } from "./render.ts";
 import { commitRecordText, type TodoMoreSnapshot, type TodoStatus, timeEstimateText } from "./state.ts";
 import type { TodoMoreDetails } from "./tool.ts";
 
@@ -199,9 +199,15 @@ export const describeTodoResult: NonNullable<ToolDefinition<typeof parametersSch
 	const parsed = detailsSchema.safeParse(result.details);
 	if (result.isError || !parsed.success) {
 		const text = result.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("\n");
-		return { tone: "error", body: [node("text", { text: text || "Invalid todo-more result details", wrap: "word" })] };
+		return {
+			tool: { title: "Todo" },
+			tone: "error",
+			body: [node("text", { text: text || "Invalid todo-more result details", wrap: "word" })],
+		};
 	}
+	const { closed, total } = progressCounts(parsed.data.more);
 	return {
+		tool: total === 0 ? { title: "Todo" } : { title: "Todo", target: `${closed}/${total}`, targetKind: "text" },
 		open: true,
 		preview: "none",
 		body: [node("col", { role: "todo-more.panel", gap: "sm" }, resultPanel(parsed.data.more, options.expanded))],
