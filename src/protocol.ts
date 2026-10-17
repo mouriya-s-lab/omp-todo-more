@@ -1,5 +1,5 @@
 import { z } from "@oh-my-pi/pi-coding-agent";
-import { estimatedMinutesSchema, type TodoGoal } from "./state.ts";
+import { type CommitScope, estimatedMinutesSchema, type TodoGoal } from "./state.ts";
 
 export const parametersSchema = z.object({ input: z.string().describe("Complete Todo document; batch related changes in one call") });
 
@@ -14,10 +14,12 @@ export const customFormat = {
     | "START" SP string LF
     | "EXPLAIN" SP string SP string LF
     | "ESTIMATE" SP string SP MINUTES LF
-    | ("DONE" | "DROP" | "RM") SP target LF
+    | "DONE" SP done LF
+    | ("DROP" | "RM") SP target LF
     | "UNBLOCK" SP block_target LF
     | "BLOCK" SP block_target (SP string)? LF
     | "VIEW" LF
+?done: target | target SP string | target SP string SP string
 ?target: string | "PHASE" SP string | "ALL"
 ?block_target: string | "PHASE" SP string
 string: /"(?:[^"\\\x00-\x1f]|\\(?:["\\\/bfnrt]|u[0-9a-fA-F]{4}))*"/
@@ -27,6 +29,8 @@ LF: /\r?\n/`,
 };
 
 export type TodoTarget = { kind: "task"; title: string } | { kind: "phase"; name: string } | { kind: "all" };
+/** The commit a DONE clause asks for: what to stage, and the message git records. */
+export type TodoCommitClause = { readonly scope: CommitScope; readonly message: string };
 export type TodoCommand =
 	| { kind: "init" | "goal"; goal: TodoGoal }
 	| { kind: "phase"; name: string }
@@ -34,7 +38,8 @@ export type TodoCommand =
 	| { kind: "start"; title: string }
 	| { kind: "explain"; title: string; explanation: string }
 	| { kind: "estimate"; title: string; estimatedMinutes: number }
-	| { kind: "done" | "drop" | "rm"; target: TodoTarget }
+	| { kind: "done"; target: TodoTarget; commit?: TodoCommitClause }
+	| { kind: "drop" | "rm"; target: TodoTarget }
 	| { kind: "unblock"; target: Exclude<TodoTarget, { kind: "all" }> }
 	| { kind: "block"; target: Exclude<TodoTarget, { kind: "all" }>; reason?: string }
 	| { kind: "view" };
@@ -95,6 +100,29 @@ function targetOf(tokens: Token[]): TodoTarget | undefined {
 	return undefined;
 }
 
+/**
+ * A DONE clause: no strings asks for no commit, one string is the message for
+ * every change, two strings are a scope and its message. `invalid` is a
+ * malformed clause, not a missing one.
+ */
+function commitClause(tokens: Token[]): TodoCommitClause | "invalid" | undefined {
+	if (tokens.length === 0) return undefined;
+	if (tokens.length === 1) {
+		const message = tokens[0];
+		if (message?.kind !== "string" || message.value.trim().length === 0) return "invalid";
+		return { scope: { kind: "all" }, message: message.value };
+	}
+	if (tokens.length === 2) {
+		const [spec, message] = tokens;
+		if (spec?.kind !== "string" || message?.kind !== "string" || message.value.trim().length === 0) return "invalid";
+		const paths = spec.value.trim();
+		return paths.length === 0
+			? { scope: { kind: "all" }, message: message.value }
+			: { scope: { kind: "paths", files: paths.split(/\s+/) }, message: message.value };
+	}
+	return "invalid";
+}
+
 function parseLine(line: string): ParsedLine {
 	const parsed = tokenize(line);
 	if (parsed.kind === "invalid") return parsed;
@@ -136,12 +164,20 @@ function parseLine(line: string): ParsedLine {
 		case "START":
 			if (onlyStrings && strings.length === 1) return { kind: "ok", command: { kind: "start", title: strings[0]! } };
 			break;
-		case "DONE":
+		case "DONE": {
+			const width = args[0]?.kind === "word" && args[0].value === "PHASE" ? 2 : 1;
+			const target = targetOf(args.slice(0, width));
+			const commit = commitClause(args.slice(width));
+			if (target && commit !== "invalid") {
+				return { kind: "ok", command: { kind: "done", target, ...(commit === undefined ? {} : { commit }) } };
+			}
+			break;
+		}
 		case "DROP":
 		case "RM": {
 			const target = targetOf(args);
 			if (target) {
-				const kind = { DONE: "done", DROP: "drop", RM: "rm" } as const;
+				const kind = { DROP: "drop", RM: "rm" } as const;
 				return { kind: "ok", command: { kind: kind[head.value], target } };
 			}
 			break;

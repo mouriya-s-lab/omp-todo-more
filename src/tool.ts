@@ -1,8 +1,12 @@
 import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
 import type { TodoPhase as HostTodoPhase, TodoCompletionTransition } from "@oh-my-pi/pi-tui/tools/todo";
 import { commitTodoState, type TodoSession } from "./commit.ts";
-import { customFormat, parametersSchema, parseTodo, type TodoCommand, type TodoTarget } from "./protocol.ts";
+import { commitCompletion, worktreeState } from "./git.ts";
+import { customFormat, parametersSchema, parseTodo, type TodoCommand, type TodoCommitClause, type TodoTarget } from "./protocol.ts";
 import {
+	type CommitRecord,
+	commitRecordText,
+	commitScopeText,
 	type Explanation,
 	estimatedMinutesSchema,
 	explanationText,
@@ -38,6 +42,7 @@ PHASE "name" followed by one or more ADD "title" "explanation" minutes appends o
 Every ADD requires your own positive integer minute estimate, no fractions or defaults. ESTIMATE "title" minutes supplies or revises a budget; EXPLAIN "title" "explanation" revises an explanation. Batch related edits in one document.
 GOAL "objective" "measure" "doneWhen" replaces all goal fields on an existing nonempty list without normalizing task status; put GOAL first if the list lacks one.
 START "title" selects the active task. DONE, DROP and RM take "title", PHASE "name", or ALL. BLOCK and UNBLOCK take "title" or PHASE "name"; BLOCK may add a quoted reason. RM ALL clears the list and goal.
+A DONE carries the commit its completion owes: DONE "title" "<message>" commits every change, DONE "title" "<paths>" "<message>" commits only those whitespace-separated pathspecs (an empty scope commits every change). The tool stages and commits through git itself and records the commit on every task that DONE completes. Outside a git checkout, or with nothing uncommitted, the clause is inert and no commit happens. In a checkout with uncommitted work a DONE without a clause is rejected: commit the work through the clause, or discard it, before completing. A clause commits the work as it stands and is never checked for covering everything uncommitted.
 VIEW must be the sole command; mutations already return the resulting list. Titles/phase names are unique and stable; NEVER use generated IDs or guess lost titles.
 Partial input is an uncommitted preview. The complete document is validated in order and committed once; syntax, target or rule errors reject the entire batch.
 Before substantive multi-step work, INIT the entire requested plan with a goal, explanation and estimate for EVERY requested item; NEVER omit work or remember leftovers. Update the goal, steps, explanations, estimates and statuses with material scope changes.
@@ -64,10 +69,19 @@ type Params = {
 	readonly reason?: string;
 	readonly explanation?: string;
 	readonly estimatedMinutes?: number;
+	/** The commit this completion owes, as the document asked for it. */
+	readonly commit?: TodoCommitClause;
 };
 
 /** Mutable working copy of the list while one call applies. */
-type WorkItem = { title: string; explanation: Explanation; time: ItemTime; status: TodoStatus; blocker?: string };
+type WorkItem = {
+	title: string;
+	explanation: Explanation;
+	time: ItemTime;
+	status: TodoStatus;
+	commit?: CommitRecord;
+	blocker?: string;
+};
 type WorkPhase = { name: string; items: WorkItem[] };
 
 /** Details of every result: native-compatible fields for the host, plus the marker and the snapshot for todo-more readers. */
@@ -446,6 +460,7 @@ function formatSummary(state: TodoMoreState, errors: readonly string[], readOnly
 								: " (blocked)"
 							: "";
 			lines.push(`    - ${checkbox} ${item.title}${tag}`);
+			if (item.commit !== undefined) lines.push(`        Commit: ${commitRecordText(item.commit)} (${commitScopeText(item.commit.scope)})`);
 			if (isOpen(item.status) || item.status === "blocked") lines.push(`        ${explanationText(item)}`);
 			lines.push(`        ${timeEstimateText(item.time)}`);
 		}
@@ -550,6 +565,12 @@ function operations(commands: TodoCommand[]): Operations {
 				params.push({ op: "estimate", task: command.title, estimatedMinutes: command.estimatedMinutes });
 				break;
 			case "done":
+				params.push({
+					op: "done",
+					...targetParams(command.target),
+					...(command.commit === undefined ? {} : { commit: command.commit }),
+				});
+				break;
 			case "drop":
 			case "rm":
 			case "unblock":
@@ -570,8 +591,52 @@ function operations(commands: TodoCommand[]): Operations {
 	return { kind: "ok", params };
 }
 
+/**
+ * The git association: a completion that closes work commits it, and a
+ * completion that would leave the checkout dirty is refused.
+ */
+async function completeWithCommit(
+	cwd: string,
+	clause: TodoCommitClause | undefined,
+	closed: readonly WorkItem[],
+): Promise<{ kind: "ok"; note?: string } | { kind: "refused"; message: string }> {
+	const named = closed.length === 1 ? `Task ${JSON.stringify(closed[0]!.title)}` : `${closed.length} completed tasks`;
+	if (clause === undefined) {
+		const state = await worktreeState(cwd);
+		if (state.kind === "failed") return { kind: "refused", message: state.message };
+		if (state.kind !== "dirty") return { kind: "ok" };
+		return {
+			kind: "refused",
+			message: `${named} would leave uncommitted work in ${state.root}: re-issue DONE "title" "<message>" to commit every change, or DONE "title" "<paths>" "<message>" to commit a scope.`,
+		};
+	}
+	const outcome = await commitCompletion(cwd, clause.scope, clause.message);
+	switch (outcome.kind) {
+		case "committed":
+			for (const item of closed) item.commit = outcome.commit;
+			return {
+				kind: "ok",
+				note: `Committed ${commitRecordText(outcome.commit)} (${commitScopeText(outcome.commit.scope)}) in ${outcome.root}.`,
+			};
+		case "inert":
+			return {
+				kind: "ok",
+				note:
+					outcome.because === "no-repository"
+						? "No git repository here: the commit clause committed nothing."
+						: "Nothing to commit: the working tree is clean, so the commit clause committed nothing.",
+			};
+		case "failed":
+			return { kind: "refused", message: outcome.message };
+		default: {
+			const unreachable: never = outcome;
+			throw new Error(`Unexpected commit outcome: ${String(unreachable)}`);
+		}
+	}
+}
+
 /** Complete calls have one acceptance anchor; generated prefixes never reach this state path. */
-export function runTodo(session: TodoSession, raw: unknown): AgentToolResult<TodoMoreDetails> {
+export async function runTodo(session: TodoSession, raw: unknown): Promise<AgentToolResult<TodoMoreDetails>> {
 	const previous = readTodoMore(session.sessionManager.getBranch());
 	const input = parametersSchema.safeParse(raw);
 	if (!input.success) return result(session, previous, `Invalid todo arguments: ${input.error.message}`, { isError: true });
@@ -586,13 +651,36 @@ export function runTodo(session: TodoSession, raw: unknown): AgentToolResult<Tod
 	const before = working(previous);
 	let phases = working(previous);
 	let next = previous;
+	const notes: string[] = [];
 	// All internal transitions belong to this one atomic mutation, not separate visible work intervals.
 	const now = Date.now();
 	for (const params of batch.params) {
 		const errors = ruleErrors(params, next);
 		if (params.op === "goal" && next.kind === "empty") errors.push("GOAL requires a non-empty list; use INIT to create one");
+		// Git runs for the items this operation itself completes, before the branch is touched.
+		const alreadyCompleted =
+			params.op === "done"
+				? new Set(
+						phases
+							.flatMap((phase) => phase.items)
+							.filter((item) => item.status === "completed")
+							.map((item) => item.title),
+					)
+				: undefined;
 		if (errors.length === 0) phases = applyOp(phases, params, errors);
 		if (errors.length > 0) return result(session, previous, formatSummary(previous, errors, true), { op, operations: ops, isError: true });
+		if (alreadyCompleted !== undefined) {
+			const closed = phases
+				.flatMap((phase) => phase.items)
+				.filter((item) => item.status === "completed" && !alreadyCompleted.has(item.title));
+			if (closed.length > 0) {
+				const step = await completeWithCommit(session.sessionManager.getCwd(), params.commit, closed);
+				if (step.kind === "refused") {
+					return result(session, previous, formatSummary(previous, [step.message], true), { op, operations: ops, isError: true });
+				}
+				if (step.note !== undefined) notes.push(step.note);
+			}
+		}
 		if (params.op !== "goal") {
 			normalizeInProgress(phases);
 			for (const phase of phases) {
@@ -608,7 +696,8 @@ export function runTodo(session: TodoSession, raw: unknown): AgentToolResult<Tod
 		const current = readTodoMore(session.sessionManager.getBranch());
 		return result(session, current, formatSummary(current, [committed.message], true), { op, operations: ops, isError: true });
 	}
-	return result(session, next, formatSummary(next, [], false), {
+	const summary = formatSummary(next, [], false);
+	return result(session, next, notes.length === 0 ? summary : `${summary}\n${notes.join("\n")}`, {
 		op,
 		operations: ops,
 		changes: batch.params,

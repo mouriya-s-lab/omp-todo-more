@@ -2,7 +2,7 @@ import type { ToolDefinition } from "@oh-my-pi/pi-coding-agent";
 import { type NativeChild, type NativeNode, node, stableKey } from "@oh-my-pi/pi-tui";
 import type { parametersSchema } from "./protocol.ts";
 import { callPreviewLines, compactTodoLabel, detailsSchema, isClosed, parseCall } from "./render.ts";
-import { type TodoMoreSnapshot, type TodoStatus, timeEstimateText } from "./state.ts";
+import { commitRecordText, type TodoMoreSnapshot, type TodoStatus, timeEstimateText } from "./state.ts";
 import type { TodoMoreDetails } from "./tool.ts";
 
 function checklistStatus(status: TodoStatus): "pending" | "active" | "done" | "dropped" | "blocked" {
@@ -33,7 +33,7 @@ function checklistPhases(snapshot: TodoMoreSnapshot) {
 			id: item.title,
 			text: item.title,
 			status: checklistStatus(item.status),
-			note: `${timeEstimateText(item.time)}\nExplanation: ${item.explanation ?? "[explanation missing]"}${item.blocker === undefined ? "" : `\nBlocker: ${item.blocker}`}`,
+			note: `${timeEstimateText(item.time)}\nExplanation: ${item.explanation ?? "[explanation missing]"}${item.blocker === undefined ? "" : `\nBlocker: ${item.blocker}`}${item.commit === undefined ? "" : `\nCommit: ${commitRecordText(item.commit)}`}`,
 		})),
 	}));
 }
@@ -235,7 +235,11 @@ function resultPanel(more: TodoMoreSnapshot, expanded: boolean): NativeChild[] {
 			id: `p${p}.${t}`,
 			text: compactTodoLabel(item),
 			status: checklistStatus(item.status),
-			...(expanded ? { note: `Explanation: ${item.explanation ?? "[explanation missing]"}` } : {}),
+			...(expanded
+				? {
+						note: `Explanation: ${item.explanation ?? "[explanation missing]"}${item.commit === undefined ? "" : `\nCommit: ${commitRecordText(item.commit)}`}`,
+					}
+				: {}),
 		})),
 	}));
 	return [goal, node("checklist", { role: "todo-more.list", mode: "full", phases: checklistPhases }, undefined, "list")];

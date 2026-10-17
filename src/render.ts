@@ -2,7 +2,7 @@ import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
 import { type ToolRenderResultOptions, z } from "@oh-my-pi/pi-coding-agent";
 import { type Component, replaceTabs, Text, type Theme, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@oh-my-pi/pi-tui";
 import { previewTodo, type TodoCommand, type TodoPreview, type TodoTarget } from "./protocol.ts";
-import { goalLines, TODO_STATUSES, type TodoMoreSnapshot, type TodoStatus, todoMoreSnapshotSchema } from "./state.ts";
+import { commitScopeText, goalLines, TODO_STATUSES, type TodoMoreSnapshot, type TodoStatus, todoMoreSnapshotSchema } from "./state.ts";
 import { OPS, RESULT_OPS, type TodoMoreDetails } from "./tool.ts";
 
 /** Result snapshots are display copies, not a second source of todo state. */
@@ -68,6 +68,10 @@ function commandPreviewLines(command: TodoCommand): string[] {
 		case "start":
 			return [`START task: ${command.title}`];
 		case "done":
+			return [
+				`DONE ${previewTarget(command.target)}`,
+				...(command.commit === undefined ? [] : [`  Commit ${commitScopeText(command.commit.scope)}: ${command.commit.message}`]),
+			];
 		case "drop":
 		case "rm":
 		case "unblock":
@@ -246,6 +250,7 @@ export function compactTodoLabel(item: Item): string {
 	const parts = [forDisplay(item.title), item.time.kind === "estimated" ? `${item.time.minutes}m` : "no estimate"];
 	if (item.explanation === null) parts.push("[explanation missing]");
 	if (item.status === "blocked") parts.push(item.blocker ? `blocked: ${forDisplay(item.blocker)}` : "blocked");
+	if (item.commit !== undefined) parts.push(item.commit.sha.slice(0, 7));
 	return parts.join(" · ");
 }
 

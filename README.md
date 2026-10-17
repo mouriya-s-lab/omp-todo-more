@@ -77,6 +77,7 @@ without trimming the task's complete title.
 | `START "title"` | Select the active task. |
 | `EXPLAIN "title" "explanation"` | Replace the task's explanation. |
 | `DONE target`, `DROP target`, `RM target` | Complete, abandon or remove the quoted title, `PHASE "name"`, or `ALL`. |
+| `DONE target "message"`, `DONE target "paths" "message"` | Complete and commit: every change, or only the listed pathspecs. |
 | `BLOCK target ["reason"]`, `UNBLOCK target` | Block or unblock the quoted title or `PHASE "name"`; neither accepts `ALL`. |
 | `VIEW` | Read the list; it must be the document's sole command. |
 
@@ -108,8 +109,9 @@ TodoTracker projection once. Results retain `todoMore: true`, `details.more`,
 native-compatible phases, storage and completion transitions.
 `details.op` identifies the operation or `"batch"`; `details.operations`
 lists operation names. Only successful mutations return `details.changes`,
-the ordered structured operations actually applied, including ADD budgets and
-ESTIMATE values. VIEW and rejected calls do not emit accepted changes.
+the ordered structured operations actually applied, including ADD budgets,
+ESTIMATE values and each `DONE`'s commit clause. VIEW and rejected calls do not
+emit accepted changes.
 
 The reader joins the host's `user_todo_edit` entries and old native tool
 results by title: known titles keep their explanation and timing metadata;
@@ -175,6 +177,34 @@ It recommends discussing the cause and approach with a subagent, or the parent
 when running as a subagent. The plugin does not spawn agents, change task
 status or relax the goal. Estimates are forecasts, not hard deadlines; agents
 must not reset the list or inflate budgets merely to hide an overrun.
+
+### Git association of a completion
+
+`DONE` can carry the commit its completion owes. The tool stages and commits
+through the host's own git bindings
+(`@oh-my-pi/pi-natives/vcs`, whole-file staging from the session's directory),
+so nothing in the list reports a commit git did not make:
+
+```text
+DONE "Implement the parser" "Accept complete documents"           # every change
+DONE "Render the preview" "src/render.ts" "Show streamed intent"  # one pathspec scope
+```
+
+One string is the message and commits every uncommitted change; an empty scope
+string, `DONE "title" "" "message"`, means the same. Two strings are a
+whitespace-separated scope and its message; pathspecs resolve against the
+session's directory, exactly like its shell. Every task this `DONE` completes
+records the accepted commit — sha, message and resolved scope — and summaries,
+native cards, the snapshot and the ctx task log show it.
+
+Outside a checkout, or with a clean working tree, the clause is inert: no commit
+is made and its parameters are ignored, whether or not they were given. In a
+checkout with uncommitted work, a `DONE` without a clause is rejected and asks
+for one; it is the completion that is refused, not the check. The scope is
+committed as given — the tool never verifies that it covered everything
+uncommitted — and a scope that stages nothing is refused with git's own answer.
+Each `DONE` in a batch commits the work still uncommitted at that point, so a
+later clause in the same batch finds a clean tree and stays inert.
 
 ## Subagents and reminders
 

@@ -62,6 +62,7 @@ ADD "检查任务历史" "确认已接受操作的顺序" 5
 |`START "title"`|选择当前 active 任务。|
 |`EXPLAIN "title" "explanation"`|替换任务解释。|
 |`DONE target`、`DROP target`、`RM target`|完成、放弃或删除带引号的 title、`PHASE "name"` 或 `ALL`。|
+|`DONE target "message"`、`DONE target "paths" "message"`|完成并提交：全部改动，或仅列出的 pathspec。|
 |`BLOCK target ["reason"]`、`UNBLOCK target`|阻塞或解除阻塞带引号的 title 或 `PHASE "name"`；均不接受 `ALL`。|
 |`VIEW`|只读列表，必须是文档中唯一命令。|
 
@@ -73,7 +74,7 @@ ANSI 与 native 调用卡片将完整命令行和未完成末行显示为未提�
 
 空列表不携带 goal。导入列表缺 goal 时，必须先写 GOAL。RM ALL 或删除最后一项后，working copy 丢弃 goal，后续追加不能继承；创建下一份列表应使用 INIT。
 
-当前会话分支是唯一权威。改变状态的成功批次只追加一条完整 `mouriya.omp.todo-more` snapshot，并更新一次宿主 TodoTracker 投影。结果保留 `todoMore: true`、`details.more`、原生兼容 phases、storage 和完成 transitions。`details.op` 为操作名或 `"batch"`，`details.operations` 列出操作名；仅成功 mutation 返回 `details.changes`，记录按顺序实际应用的结构化操作，包括 ADD 的预算与 ESTIMATE 值。VIEW 和失败不产生 accepted changes。
+当前会话分支是唯一权威。改变状态的成功批次只追加一条完整 `mouriya.omp.todo-more` snapshot，并更新一次宿主 TodoTracker 投影。结果保留 `todoMore: true`、`details.more`、原生兼容 phases、storage 和完成 transitions。`details.op` 为操作名或 `"batch"`，`details.operations` 列出操作名；仅成功 mutation 返回 `details.changes`，记录按顺序实际应用的结构化操作，包括 ADD 的预算、ESTIMATE 值以及每个 `DONE` 的提交子句。VIEW 和失败不产生 accepted changes。
 
 reader 按标题联结宿主 `user_todo_edit` 与旧原生工具结果：已知标题保留 explanation 和计时元数据，新标题缺少两者；原生空 snapshot 中断此前 goal、explanation 和计时元数据的继承。自有 marked 工具结果不重复作为状态记录读取。现有 reader 忽略格式无效的记录；本次迁移不更改这项兼容语义。
 
@@ -102,6 +103,19 @@ reader 按标题联结宿主 `user_todo_edit` 与旧原生工具结果：已知�
 
 警告指出任务、预计时间与已耗时间，并要求 agent 保持预期结果、验收标准和质量，核实超时原因、判断是否改变方针、继续推进完整任务。警告推荐与 subagent 讨论原因和方针；子会话可与 parent 沟通。插件不自动创建 agent、不改变任务 status、不降低 goal。估计是预测而非硬 deadline，agent 不得仅为掩盖超时而重建列表或抬高预算。
 
+
+### 完成与 git 关联
+
+`DONE` 可以携带这次完成所欠的提交。提交由 todo 工具自己经宿主 git 绑定完成（`@oh-my-pi/pi-natives/vcs`，按整文件从会话目录暂存），因此列表里不会出现 git 并未产生的提交：
+
+```text
+DONE "实现文档解析" "接受完整文档"                                  # 全部改动
+DONE "显示流式预览" "src/render.ts" "显示流式意图"                 # 仅该 pathspec
+```
+
+一个字符串是提交信息，提交全部未提交改动；空 scope 字符串 `DONE "title" "" "message"` 含义相同。两个字符串依次是空白分隔的 scope 与其提交信息；pathspec 相对会话目录解析，与模型自己的 shell 一致。该 `DONE` 完成的每个任务都会记录被 git 接受的提交（sha、message、解析后的 scope），summary、native 卡片、snapshot 与 ctx task log 都会显示。
+
+不在 checkout 内，或工作区没有未提交改动时，该子句是惰性的：不产生提交，参数无论是否给出都被忽略。在存在未提交改动的 checkout 内，不带子句的 `DONE` 会被拒绝并要求补上子句——被拒绝的是这次完成，不是检查本身。scope 按原样提交，工具不会校验它是否覆盖了全部未提交改动；暂存不到任何内容的 scope 会带着 git 自己的回答被拒绝。同一批次中的每个 `DONE` 提交该时刻仍存在的未提交改动，因此同批次后续子句面对干净工作区时会保持惰性。
 
 ## 子会话与提醒
 

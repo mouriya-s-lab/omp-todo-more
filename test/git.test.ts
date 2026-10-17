@@ -1,0 +1,201 @@
+import { afterAll, describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
+import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import type { TodoSession } from "../src/commit.ts";
+import { type CommitRecord, readTodoMore, type TodoMoreSnapshot, toSnapshot } from "../src/state.ts";
+import { runTodo, type TodoMoreDetails } from "../src/tool.ts";
+
+const goal = {
+	objective: "Commit the work each item completes",
+	measure: "git holds a commit for the item, and the item records it",
+	doneWhen: "The checkout is clean and the item carries the commit git accepted",
+};
+const init = `INIT ${JSON.stringify(goal.objective)} ${JSON.stringify(goal.measure)} ${JSON.stringify(goal.doneWhen)}`;
+const created: string[] = [];
+
+afterAll(async () => {
+	for (const dir of created) await rm(dir, { recursive: true, force: true });
+});
+
+function document(...lines: string[]): string {
+	return ["*** Begin Todo", ...lines, "*** End Todo"].join("\n");
+}
+
+/** Real git, so every assertion here reads the repository itself, not a stub. */
+async function git(cwd: string, ...args: string[]): Promise<string> {
+	const result = await Bun.$`git -C ${cwd} ${args}`.quiet().nothrow();
+	if (result.exitCode !== 0) throw new Error(`git ${args.join(" ")} failed: ${result.stderr.toString().trim()}`);
+	return result.stdout.toString().trim();
+}
+
+/** A real checkout: one commit, signing off, and the session's cwd is its root. */
+async function repository(files: Record<string, string>): Promise<string> {
+	const cwd = await mkdtemp(join(tmpdir(), "todo-more-git-"));
+	created.push(cwd);
+	await git(cwd, "init", "-q", "-b", "main");
+	await git(cwd, "config", "user.email", "todo-more@example.invalid");
+	await git(cwd, "config", "user.name", "Todo More Tests");
+	await git(cwd, "config", "commit.gpgsign", "false");
+	for (const [name, body] of Object.entries(files)) await Bun.write(join(cwd, name), body);
+	await git(cwd, "add", "-A");
+	await git(cwd, "commit", "-q", "-m", "initial");
+	return cwd;
+}
+
+type Harness = {
+	cwd: string;
+	session: TodoSession;
+	call: (...lines: string[]) => Promise<AgentToolResult<TodoMoreDetails>>;
+	snapshot: () => TodoMoreSnapshot;
+};
+
+function fixture(cwd: string): Harness {
+	const sessionManager = SessionManager.inMemory(cwd);
+	const session: TodoSession = { sessionManager, setTodoPhases: () => {} };
+	return {
+		cwd,
+		session,
+		call: (...lines: string[]) => runTodo(session, { input: document(...lines) }),
+		snapshot: (): TodoMoreSnapshot => toSnapshot(readTodoMore(sessionManager.getBranch())),
+	};
+}
+
+function itemOf(snapshot: TodoMoreSnapshot, title: string) {
+	const item = snapshot.phases.flatMap((phase) => phase.items).find((candidate) => candidate.title === title);
+	if (item === undefined) throw new Error(`Expected task ${title}`);
+	return item;
+}
+
+const textOf = (result: { content: { type: string; text?: string }[] }): string =>
+	result.content.flatMap((block) => (block.type === "text" && block.text !== undefined ? [block.text] : [])).join("\n");
+
+function commitOf(harness: Harness, title: string): CommitRecord {
+	const commit = itemOf(harness.snapshot(), title).commit;
+	if (commit === undefined) throw new Error(`Expected a commit on ${title}`);
+	return commit;
+}
+
+describe("the git association of a completion", () => {
+	test("the session's directory is the repository under test", async () => {
+		const harness = fixture(await repository({ "a.txt": "one\n" }));
+		expect(harness.session.sessionManager.getCwd()).toBe(harness.cwd);
+	});
+
+	test("a message commits every change and records the commit git accepted", async () => {
+		const harness = fixture(await repository({ "a.txt": "one\n" }));
+		await harness.call(init, 'ADD "Implement" "Change the tracked file" 5');
+		await Bun.write(join(harness.cwd, "a.txt"), "two\n");
+		await Bun.write(join(harness.cwd, "b.txt"), "new\n");
+		const result = await harness.call('DONE "Implement" "Implement the change"');
+
+		expect(result.isError).not.toBe(true);
+		const head = await git(harness.cwd, "rev-parse", "HEAD");
+		const commit = commitOf(harness, "Implement");
+		expect(commit).toEqual({ sha: head, message: "Implement the change", scope: { kind: "all" } });
+		expect(await git(harness.cwd, "log", "-1", "--format=%s")).toBe("Implement the change");
+		expect(await git(harness.cwd, "log", "-1", "--format=%an")).toBe("Todo More Tests");
+		expect(await git(harness.cwd, "status", "--porcelain")).toBe("");
+		expect(itemOf(harness.snapshot(), "Implement").status).toBe("completed");
+		expect(textOf(result)).toContain(`Committed ${head.slice(0, 7)} "Implement the change" (all changes)`);
+	});
+
+	test("uncommitted work refuses a completion that carries no clause", async () => {
+		const harness = fixture(await repository({ "a.txt": "one\n" }));
+		await harness.call(init, 'ADD "Implement" "Change the tracked file" 5');
+		const head = await git(harness.cwd, "rev-parse", "HEAD");
+		await Bun.write(join(harness.cwd, "a.txt"), "two\n");
+
+		const result = await harness.call('DONE "Implement"');
+		expect(result.isError).toBe(true);
+		expect(textOf(result)).toContain(`Task "Implement" would leave uncommitted work in ${harness.cwd}`);
+		expect(textOf(result)).toContain('re-issue DONE "title" "<message>" to commit every change');
+		expect(itemOf(harness.snapshot(), "Implement").status).not.toBe("completed");
+		expect(await git(harness.cwd, "rev-parse", "HEAD")).toBe(head);
+		expect(await git(harness.cwd, "status", "--porcelain")).toBe("M a.txt");
+	});
+
+	test("a scoped clause commits its pathspecs and leaves the rest uncommitted", async () => {
+		const harness = fixture(await repository({ "a.txt": "one\n", "b.txt": "one\n" }));
+		await harness.call(init, 'ADD "Implement" "Change one tracked file" 5');
+		await Bun.write(join(harness.cwd, "a.txt"), "two\n");
+		await Bun.write(join(harness.cwd, "b.txt"), "two\n");
+
+		const result = await harness.call('DONE "Implement" "a.txt" "Change only a"');
+		expect(result.isError).not.toBe(true);
+		const committed = await git(harness.cwd, "show", "--stat", "--format=%s", "HEAD");
+		expect(committed).toContain("Change only a");
+		expect(committed).toContain("a.txt |");
+		expect(committed).not.toContain("b.txt");
+		expect(await git(harness.cwd, "status", "--porcelain")).toBe("M b.txt");
+		expect(commitOf(harness, "Implement")).toEqual({
+			sha: await git(harness.cwd, "rev-parse", "HEAD"),
+			message: "Change only a",
+			scope: { kind: "paths", files: ["a.txt"] },
+		});
+	});
+
+	test("a scope that stages nothing is refused with git's own answer", async () => {
+		const harness = fixture(await repository({ "a.txt": "one\n" }));
+		await harness.call(init, 'ADD "Implement" "Change the tracked file" 5');
+		await Bun.write(join(harness.cwd, "a.txt"), "two\n");
+
+		const result = await harness.call('DONE "Implement" "missing.txt" "Change a missing file"');
+		expect(result.isError).toBe(true);
+		expect(textOf(result)).toContain('The scope "missing.txt" staged nothing');
+		expect(itemOf(harness.snapshot(), "Implement").status).not.toBe("completed");
+	});
+
+	test("a clean checkout and a directory outside git leave the clause inert", async () => {
+		const clean = fixture(await repository({ "a.txt": "one\n" }));
+		await clean.call(init, 'ADD "Verify" "Change nothing at all" 5');
+		const cleanHead = await git(clean.cwd, "rev-parse", "HEAD");
+		const inert = await clean.call('DONE "Verify" "Nothing to commit here"');
+		expect(inert.isError).not.toBe(true);
+		expect(textOf(inert)).toContain("Nothing to commit: the working tree is clean");
+		expect(itemOf(clean.snapshot(), "Verify").commit).toBeUndefined();
+		expect(await git(clean.cwd, "rev-parse", "HEAD")).toBe(cleanHead);
+
+		const outside = await mkdtemp(join(tmpdir(), "todo-more-plain-"));
+		created.push(outside);
+		const plain = fixture(outside);
+		await plain.call(init, 'ADD "Verify" "Change nothing at all" 5');
+		const none = await plain.call('DONE "Verify" "No repository to commit in"');
+		expect(none.isError).not.toBe(true);
+		expect(textOf(none)).toContain("No git repository here");
+		expect(itemOf(plain.snapshot(), "Verify").commit).toBeUndefined();
+	});
+
+	test("each completion in one batch commits its own work, and the second clause is inert once the tree is clean", async () => {
+		const harness = fixture(await repository({ "a.txt": "one\n" }));
+		await harness.call(init, 'ADD "First" "Change a.txt" 5', 'ADD "Second" "Change nothing" 5');
+		await Bun.write(join(harness.cwd, "a.txt"), "two\n");
+
+		const result = await harness.call('DONE "First" "Commit the first item"', 'DONE "Second" "Commit the second item"');
+		expect(result.isError).not.toBe(true);
+		expect(commitOf(harness, "First")).toEqual({
+			sha: await git(harness.cwd, "rev-parse", "HEAD"),
+			message: "Commit the first item",
+			scope: { kind: "all" },
+		});
+		expect(itemOf(harness.snapshot(), "Second").commit).toBeUndefined();
+		expect(textOf(result)).toContain("Nothing to commit: the working tree is clean");
+		expect(await git(harness.cwd, "log", "--format=%s")).toBe("Commit the first item\ninitial");
+	});
+
+	test("a committed completion survives the branch and the host projection", async () => {
+		const harness = fixture(await repository({ "a.txt": "one\n" }));
+		await harness.call(init, 'ADD "Implement" "Change the tracked file" 5');
+		await Bun.write(join(harness.cwd, "a.txt"), "two\n");
+		const result = await harness.call('DONE "Implement" "Implement the change"');
+
+		const details = result.details as TodoMoreDetails;
+		expect(details.changes).toEqual([
+			{ op: "done", task: "Implement", commit: { scope: { kind: "all" }, message: "Implement the change" } },
+		]);
+		expect(details.more).toEqual(harness.snapshot());
+		expect(itemOf(harness.snapshot(), "Implement").commit?.sha).toMatch(/^[0-9a-f]{40}$/);
+	});
+});

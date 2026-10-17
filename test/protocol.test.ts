@@ -97,6 +97,33 @@ describe("Todo document consumption", () => {
 		});
 	});
 
+	test("accepts a commit clause on DONE and reads scope and message from its strings", () => {
+		expect(
+			parseTodo(
+				document(
+					'DONE "Implement"',
+					'DONE ALL "Commit every change"',
+					'DONE "Implement" "Commit one change"',
+					'DONE "Implement" "src/ index.ts" "Commit a scope"',
+					'DONE PHASE "Delivery" "" "Commit a phase"',
+				),
+			),
+		).toEqual({
+			kind: "ok",
+			commands: [
+				{ kind: "done", target: { kind: "task", title: "Implement" } },
+				{ kind: "done", target: { kind: "all" }, commit: { scope: { kind: "all" }, message: "Commit every change" } },
+				{ kind: "done", target: { kind: "task", title: "Implement" }, commit: { scope: { kind: "all" }, message: "Commit one change" } },
+				{
+					kind: "done",
+					target: { kind: "task", title: "Implement" },
+					commit: { scope: { kind: "paths", files: ["src/", "index.ts"] }, message: "Commit a scope" },
+				},
+				{ kind: "done", target: { kind: "phase", name: "Delivery" }, commit: { scope: { kind: "all" }, message: "Commit a phase" } },
+			],
+		});
+	});
+
 	test("parses a goal update and explicit re-estimate in mutation order", () => {
 		expect(
 			parseTodo(
@@ -198,6 +225,13 @@ describe("Todo document consumption", () => {
 		{ label: "ESTIMATE ALL selector", input: document("ESTIMATE ALL 10") },
 		{ label: "ADD extra argument", input: document('ADD "Task" "Reason" 10 "extra"') },
 		{ label: "ESTIMATE extra argument", input: document('ESTIMATE "Task" 10 "extra"') },
+		{ label: "empty commit message", input: document('DONE "Task" ""') },
+		{ label: "empty scoped commit message", input: document('DONE "Task" "src/" ""') },
+		{ label: "whitespace commit message", input: document('DONE "Task" "  "') },
+		{ label: "three-string commit clause", input: document('DONE "Task" "a.txt" "Message" "extra"') },
+		{ label: "unquoted scope", input: document('DONE "Task" src.txt "Message"') },
+		{ label: "commit clause on DROP", input: document('DROP "Task" "Message"') },
+		{ label: "commit clause on RM", input: document('RM "Task" "Message"') },
 	];
 	for (const { label, input } of invalidDocuments) {
 		test(`rejects ${label} instead of accepting its valid prefix`, () => expectInvalid(input));

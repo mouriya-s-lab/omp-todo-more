@@ -191,6 +191,36 @@ describe("native todo presentation", () => {
 		expect(note).toMatch(/no time estimate/i);
 		expect(note).not.toMatch(/Estimate:\s*\d/);
 	});
+
+	test("a committed completion shows its commit in the row and its expanded note", () => {
+		const committed: TodoMoreSnapshot = {
+			goal: snapshot.goal,
+			phases: [
+				{
+					name: "Delivery",
+					items: [
+						{
+							title: "Implement the card",
+							explanation: "Use the native checklist",
+							status: "completed",
+							time: { kind: "estimated", budgetId: "implement-budget", minutes: 25, elapsedMs: 60_000, runningSince: null },
+							commit: {
+								sha: "0123456789abcdef0123456789abcdef01234567",
+								message: "Implement the card",
+								scope: { kind: "paths", files: ["src/native.ts"] },
+							},
+						},
+					],
+				},
+			],
+		};
+		const expanded = only(rows(resultBody(resultFor(committed), true)));
+		expect(expanded.text).toContain("0123456");
+		expect(expanded.note).toContain('Commit: 0123456 "Implement the card"');
+		const collapsed = only(rows(resultBody(resultFor(committed))));
+		expect(collapsed.text).toContain("0123456");
+		expect(collapsed.note).toBeUndefined();
+	});
 });
 
 describe("native todo HUD", () => {

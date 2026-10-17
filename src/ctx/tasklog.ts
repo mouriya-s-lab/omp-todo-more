@@ -12,6 +12,7 @@ import { type LocalProtocolOptions, resolveLocalRoot } from "@oh-my-pi/pi-coding
 import { AgentRegistry, MAIN_AGENT_ID } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import { isRecord } from "@oh-my-pi/pi-utils";
 import { errorText } from "../errors.ts";
+import { commitRecordText, type TodoMoreSnapshot, todoMoreSnapshotSchema } from "../state.ts";
 import { type GoalOperation, goalOperation, type TodoOperation, taskLogGoalSchema, taskLogPath, todoOperation } from "./task-log.ts";
 
 interface TodoPhaseDetails {
@@ -209,18 +210,28 @@ function formatTodoDetail(op: TodoOperation, input: Record<string, unknown>, det
 	}
 }
 
-function formatTodoMoreChanges(changes: TodoMoreChange[], timestamp: string): string {
+function formatTodoMoreChanges(changes: TodoMoreChange[], timestamp: string, snapshot: TodoMoreSnapshot | undefined): string {
 	const lines: string[] = [];
 	for (const change of changes) {
 		if (change.op !== "goal" && change.op !== "estimate") {
 			// Each change describes its own operation, not the batch's final projection.
 			const detail = formatTodoDetail(change.op, change, undefined);
-			if (detail !== undefined) lines.push(`- ${timestamp} todo ${change.op}: ${detail}`);
+			if (detail !== undefined) lines.push(`- ${timestamp} todo ${change.op}: ${detail}${commitDetail(change, snapshot)}`);
 		}
 		// The existing history vocabulary has no estimate event; retain that policy without dropping the rest of a batch.
 		if (change.goal !== undefined) lines.push(`- ${timestamp} todo-more set: ${JSON.stringify(change.goal)}`);
 	}
 	return lines.join("\n");
+}
+
+/** The commit a completion made, as the item it closed recorded it. */
+function commitDetail(change: TodoMoreChange, snapshot: TodoMoreSnapshot | undefined): string {
+	if (change.op !== "done" || snapshot === undefined) return "";
+	const phases = change.phase === undefined ? snapshot.phases : snapshot.phases.filter((phase) => phase.name === change.phase);
+	const item = phases
+		.flatMap((phase) => phase.items)
+		.find((candidate) => (change.task === undefined || candidate.title === change.task) && candidate.commit !== undefined);
+	return item?.commit === undefined ? "" : ` (commit ${commitRecordText(item.commit)})`;
 }
 
 function formatGoalDetail(op: GoalOperation, input: Record<string, unknown>, details: GoalResultDetails | undefined): string | undefined {
@@ -309,7 +320,8 @@ export function registerCtxTasklog(pi: ExtensionAPI): void {
 						safeWarn(pi, new Error(`Invalid todo-more changes: ${changes.error.message}`));
 						return;
 					}
-					const lines = formatTodoMoreChanges(changes.data, timestamp);
+					const snapshot = todoMoreSnapshotSchema.safeParse(event.details.more);
+					const lines = formatTodoMoreChanges(changes.data, timestamp, snapshot.success ? snapshot.data : undefined);
 					if (lines === "") return;
 					const target = resolveTaskLogPath(ctx);
 					await queueTaskLog(pi, target.path, target.agentId, lines);

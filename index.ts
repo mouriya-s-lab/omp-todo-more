@@ -10,6 +10,9 @@
  * Registers the tool `todo` (tool.ts, rendered by render.ts) and the hooks of
  * reminders.ts (stop reminder, mid-run nudge, eager prelude, goal-mode
  * context), plus `before_agent_start` to give `task:*` subagents the tool.
+ * A completion commits the work it closes (src/git.ts) through the host's git
+ * bindings: `DONE` carries the commit clause, a checkout with uncommitted work
+ * refuses a completion without one, and each committed item keeps the sha.
  *
  * Also registers `ctx` (src/ctx/index.ts): the read-only context tool and its
  * post-compaction hint. src/ctx/tasklog.ts appends each successful `todo` / `goal`

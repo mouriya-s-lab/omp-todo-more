@@ -12,6 +12,9 @@
  * `// @upstream <verbatim|adapted> <package>@<version> <path>#<symbol>` …
  * `// @upstream-end`. `verbatim` means the block is character-for-character the
  * upstream text; `adapted` means it was changed (rich items, strict types).
+ *
+ * An item also carries the commit its completion made (git.ts takes it): a
+ * copy of git's answer, written once and never refreshed.
  */
 import { type SessionEntry, z } from "@oh-my-pi/pi-coding-agent";
 import { USER_TODO_EDIT_CUSTOM_TYPE } from "@oh-my-pi/pi-coding-agent/tools/todo";
@@ -33,6 +36,27 @@ export type GoalState = { readonly kind: "set"; readonly goal: TodoGoal } | { re
 
 /** `missing`: the item was added outside the tool (`/todo`, an older session) and still needs one. */
 export type Explanation = { readonly kind: "explained"; readonly text: string } | { readonly kind: "missing" };
+
+/** What a completion's commit covers: `all` is the whole checkout, `paths` the listed pathspecs only. */
+export type CommitScope = { readonly kind: "all" } | { readonly kind: "paths"; readonly files: string[] };
+
+/**
+ * The commit a completion made, as git answered it. Git is the authority for
+ * what was committed; this is the copy the list keeps, taken once at the
+ * commit and never refreshed, so it can be read back without asking git again.
+ */
+export type CommitRecord = { readonly sha: string; readonly message: string; readonly scope: CommitScope };
+
+export const commitScopeSchema = z.union([
+	z.object({ kind: z.literal("all") }),
+	z.object({ kind: z.literal("paths"), files: z.array(z.string().min(1)).min(1) }),
+]);
+
+export const commitRecordSchema = z.object({
+	sha: z.string().min(1),
+	message: z.string().min(1),
+	scope: commitScopeSchema,
+});
 
 /** Estimates are model-owned; imported items have no invented budget or historical clock. */
 export const estimatedMinutesSchema = z
@@ -73,6 +97,8 @@ export type TodoItem = {
 	readonly explanation: Explanation;
 	readonly status: TodoStatus;
 	readonly time: ItemTime;
+	/** The commit this item's completion made; absent when nothing was committed for it. */
+	readonly commit?: CommitRecord;
 	readonly blocker?: string;
 };
 
@@ -97,6 +123,7 @@ export const itemSnapshotSchema = z.object({
 	explanation: z.string().nullable(),
 	status: statusSchema,
 	blocker: z.string().optional(),
+	commit: commitRecordSchema.optional(),
 	time: itemTimeSchema.default(() => ({ kind: "missing" })),
 });
 
@@ -152,6 +179,7 @@ export function toSnapshot(state: TodoMoreState): TodoMoreSnapshot {
 						status: item.status,
 						time: item.time,
 						...(item.blocker === undefined ? {} : { blocker: item.blocker }),
+						...(item.commit === undefined ? {} : { commit: item.commit }),
 					})),
 				})),
 			};
@@ -173,6 +201,7 @@ function fromSnapshot(snapshot: TodoMoreSnapshot): TodoMoreState {
 				status: item.status,
 				time: item.time,
 				...(item.blocker === undefined ? {} : { blocker: item.blocker }),
+				...(item.commit === undefined ? {} : { commit: item.commit }),
 			}),
 		),
 	}));
@@ -216,15 +245,17 @@ function joinNative(phases: NativePhases, base: TodoMoreState, at: number): Todo
 	if (base.kind === "list") for (const item of base.phases.flatMap((phase) => phase.items)) known.set(item.title, item);
 	const joined = phases.map((phase) => ({
 		name: phase.name,
-		items: phase.tasks.map(
-			(task): TodoItem => ({
+		items: phase.tasks.map((task): TodoItem => {
+			const previous = known.get(task.content);
+			return {
 				title: task.content,
-				explanation: known.get(task.content)?.explanation ?? { kind: "missing" },
-				time: transitionTime(known.get(task.content)?.time ?? { kind: "missing" }, task.status, at),
+				explanation: previous?.explanation ?? { kind: "missing" },
+				time: transitionTime(previous?.time ?? { kind: "missing" }, task.status, at),
 				status: task.status,
 				...(task.blocker === undefined ? {} : { blocker: task.blocker }),
-			}),
-		),
+				...(previous?.commit === undefined ? {} : { commit: previous.commit }),
+			};
+		}),
 	}));
 	return stateOf(base.kind === "list" ? base.goal : { kind: "missing" }, joined);
 }
@@ -297,4 +328,14 @@ export function explanationText(item: TodoItem): string {
 			throw new Error(`Unexpected explanation: ${String(unreachable)}`);
 		}
 	}
+}
+
+/** A commit for display: short sha and the message git recorded. */
+export function commitRecordText(commit: CommitRecord): string {
+	return `${commit.sha.slice(0, 7)} ${JSON.stringify(commit.message)}`;
+}
+
+/** A commit's scope for display. */
+export function commitScopeText(scope: CommitScope): string {
+	return scope.kind === "all" ? "all changes" : scope.files.join(" ");
 }
