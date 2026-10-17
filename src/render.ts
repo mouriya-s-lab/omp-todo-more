@@ -160,6 +160,15 @@ export function isClosed(item: { status: TodoStatus }): boolean {
 }
 // @upstream-end
 
+/** Closed and total task counts over non-empty phases: the `closed/total` header progress of a todo result. */
+export function progressCounts(more: TodoMoreSnapshot): { closed: number; total: number } {
+	const phases = more.phases.filter((phase) => phase.items.length > 0);
+	return {
+		closed: phases.reduce((sum, phase) => sum + phase.items.filter(isClosed).length, 0),
+		total: phases.reduce((sum, phase) => sum + phase.items.length, 0),
+	};
+}
+
 // @upstream adapted @oh-my-pi/pi-tui@18.10.1 src/tools/todo.ts#selectWithinCap
 const COLLAPSED_ITEMS = 8;
 function selectWithinCap(items: Item[]): { items: Item[]; summary: string } {
@@ -337,8 +346,7 @@ export function renderTodoResult(
 	const phases = details.more.phases.filter((phase) => phase.items.length > 0);
 	const completed = details.completedTasks ?? [];
 	const completionKeys = new Set(completed.map((item) => `${item.phase}\u0000${item.content}`));
-	const total = phases.reduce((sum, phase) => sum + phase.items.length, 0);
-	const closed = phases.reduce((sum, phase) => sum + phase.items.filter(isClosed).length, 0);
+	const { closed, total } = progressCounts(details.more);
 	const header = statusLine(theme, theme.styledSymbol("tool.todo", "accent"), `${closed}/${total}`);
 	if (total === 0) return new Text(`${header}\n  ${theme.fg("dim", "No todos")}`, 0, 0);
 	const call = parseCall(args);

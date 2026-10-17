@@ -334,6 +334,28 @@ describe("native result card", () => {
 		]);
 		expect(rows(body).map((item) => item.note)).toContain("Explanation: Keep the host projection");
 	});
+
+	test("settled header shows closed/total progress, and an empty list shows only the title", () => {
+		const progress = describeTodoResult(
+			resultFor({
+				goal: { objective: "Ship", measure: "Measured", doneWhen: "Done" },
+				phases: [
+					{
+						name: "Open",
+						items: [
+							{ title: "Done", explanation: "Shipped", status: "completed", time: { kind: "missing" } },
+							{ title: "Next", explanation: "Pending", status: "pending", time: { kind: "missing" } },
+						],
+					},
+				],
+			}),
+			{ expanded: false, isPartial: false },
+		);
+		expect(progress?.tool).toEqual({ title: "Todo", target: "1/2", targetKind: "text" });
+
+		const empty = describeTodoResult(resultFor({ goal: null, phases: [] }), { expanded: false, isPartial: false });
+		expect(empty?.tool).toEqual({ title: "Todo" });
+	});
 });
 
 describe("native historical todo results", () => {

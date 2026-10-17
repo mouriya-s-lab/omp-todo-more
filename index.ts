@@ -92,6 +92,8 @@ const TOOL_FIELDS = {
 	mergeCallAndResult: true,
 	describeCall: describeTodoCall,
 	describeResult: describeTodoResult,
+	renderCall: renderTodoCall,
+	renderResult: renderTodoResult,
 };
 
 /** The AgentSession this extension instance serves, through the registry entry of its agent id. */
@@ -135,8 +137,6 @@ export const TODO_TOOL_DEFINITION = {
 		if (session === undefined) throw new Error(`todo: no session registered for agent ${ctx.agent.id}`);
 		return runTodo(session, params);
 	},
-	renderCall: renderTodoCall,
-	renderResult: renderTodoResult,
 };
 
 export default async function todoMore(pi: ExtensionAPI): Promise<void> {
