@@ -300,10 +300,12 @@ apply through the native renderer and inherited variables, including while
 the popover is open. The plugin stores no theme copy and retains native pill
 sizing and typography rather than freezing theme colors or font metrics.
 
-Native tool cards and reminder notices use the same goal fields and native
-checklist presentation. Historical tool cards render their own `details.more`;
-reminders keep the snapshot from their own event. Neither becomes an edit
-source or changes when the current list is edited.
+`INIT` and `VIEW` tool cards display the full list; incremental CRUD tool cards
+display only the items or goal changed in that call while collapsed, and
+restore the full `details.more` snapshot when expanded. Stop reminder notices
+render only the reminder event header without listing todo items. Historical
+tool cards render their own `details.more`; neither tool cards nor reminders
+become an edit source or change when the current list is edited.
 
 In Tern's main-session composer, `/todo` and `/todo edit` open the rich
 `/todo-more` editor. A focused child view keeps the host's slash-command

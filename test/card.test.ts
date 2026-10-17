@@ -158,4 +158,68 @@ describe("one card per todo call", () => {
 		expect(count(nodes, CHECKLIST_ROLE)).toBe(1);
 		settled.stopAnimation();
 	});
+
+	test("an incremental update renders only the delta in ANSI and native cards until expanded", () => {
+		const deltaDoc = `*** Begin Todo\nDONE "Read the merge path"\n*** End Todo\n`;
+		const deltaSnapshot: TodoMoreSnapshot = {
+			goal: snapshot.goal,
+			phases: [
+				{
+					name: "Implementation",
+					items: [
+						{ ...snapshot.phases[0]!.items[0]!, status: "completed" },
+						{ ...snapshot.phases[0]!.items[1]!, status: "in_progress" },
+					],
+				},
+			],
+		};
+		const target = component();
+		target.updateArgs({ input: deltaDoc });
+		target.setArgsComplete();
+		target.setExecutionStarted();
+		target.updateResult(
+			{
+				content: [{ type: "text", text: "Updated." }],
+				details: {
+					op: "done",
+					operations: ["done"],
+					changes: [{ op: "done", task: "Read the merge path" }],
+					completedTasks: [{ phase: "Implementation", content: "Read the merge path" }],
+					phases: [
+						{
+							name: "Implementation",
+							tasks: [
+								{ content: "Read the merge path", status: "completed" },
+								{ content: "Set the flag", status: "in_progress" },
+							],
+						},
+					],
+					storage: "session",
+					todoMore: true,
+					more: deltaSnapshot,
+				},
+			},
+			false,
+			"todo-call",
+		);
+
+		const collapsedLines = target.render(100);
+		const collapsedNodes = nativeStrings(target);
+		expect(count(collapsedLines, "Read the merge path · 25m")).toBe(1);
+		expect(count(collapsedLines, "Set the flag · 10m")).toBe(0);
+		expect(count(collapsedLines, "Objective: Stop the double render")).toBe(0);
+		expect(count(collapsedNodes, "Read the merge path · 25m")).toBe(1);
+		expect(count(collapsedNodes, "Set the flag · 10m")).toBe(0);
+		expect(count(collapsedNodes, "Objective: Stop the double render")).toBe(0);
+
+		target.setExpanded(true);
+		const expandedLines = target.render(100);
+		const expandedNodes = nativeStrings(target);
+		expect(count(expandedLines, "Read the merge path · 25m")).toBe(1);
+		expect(count(expandedLines, "Set the flag · 10m")).toBe(1);
+		expect(count(expandedLines, "Objective: Stop the double render")).toBe(1);
+		expect(count(expandedNodes, "Read the merge path · 25m")).toBe(1);
+		expect(count(expandedNodes, "Set the flag · 10m")).toBe(1);
+		target.stopAnimation();
+	});
 });

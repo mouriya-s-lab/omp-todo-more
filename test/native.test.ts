@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import type { NativeChild, NativeNode } from "@oh-my-pi/pi-tui";
+import { ensureThemeSync, type NativeChild, type NativeNode, theme } from "@oh-my-pi/pi-tui";
 import { describeSnapshot, describeTodoHud, describeTodoResult } from "../src/native.ts";
+import { renderReminder } from "../src/reminders.ts";
 import type { TodoMoreSnapshot, TodoStatus } from "../src/state.ts";
 import type { TodoMoreDetails } from "../src/tool.ts";
 
@@ -355,6 +356,93 @@ describe("native result card", () => {
 
 		const empty = describeTodoResult(resultFor({ goal: null, phases: [] }), { expanded: false, isPartial: false });
 		expect(empty?.tool).toEqual({ title: "Todo" });
+	});
+
+	test("incremental CRUD shows only changed items while collapsed, and expanding restores the full snapshot", () => {
+		const updated = structuredClone(snapshot);
+		updated.phases[0]!.items[0]!.status = "completed";
+		const crudResult = resultFor(updated);
+		crudResult.details.op = "batch";
+		crudResult.details.operations = ["done", "explain"];
+		crudResult.details.changes = [
+			{ op: "done", task: "Plan the replacement" },
+			{ op: "explain", task: "Implement the card", explanation: "Use the native checklist" },
+		];
+
+		const collapsedBody = resultBody(crudResult, false);
+		expect(nativeNodes(collapsedBody).filter((entry) => entry.k === "kv")).toHaveLength(0);
+		expect(
+			nativeNodes(collapsedBody)
+				.filter((entry) => entry.k === "text")
+				.map((entry) => entry.p?.text),
+		).toEqual([]);
+		expect(checklist(collapsedBody).phases.map((phase) => phase.title)).toEqual(["Delivery"]);
+		expect(rows(collapsedBody).map((item) => ({ text: item.text, status: item.status, note: item.note }))).toEqual([
+			{ text: "Plan the replacement · no estimate", status: "done", note: undefined },
+			{ text: "Implement the card · 25m", status: "active", note: "Explanation: Use the native checklist" },
+		]);
+
+		const expandedBody = resultBody(crudResult, true);
+		expect(goalItems(expandedBody)).toEqual([
+			{ k: "Objective", v: "Ship the native todo replacement" },
+			{ k: "Measure", v: "Every task and explanation is visible" },
+			{ k: "Done when", v: "The replacement preserves all rich todo fields" },
+		]);
+		expect(checklist(expandedBody).phases.map((phase) => phase.title)).toEqual(["Delivery", "Verification"]);
+		expect(rows(expandedBody)).toHaveLength(5);
+	});
+
+	test("RM delta shows only the removed task without listing surviving tasks", () => {
+		const remaining = structuredClone(snapshot);
+		remaining.phases[0]!.items = remaining.phases[0]!.items.slice(1);
+		const rmResult = resultFor(remaining);
+		rmResult.details.op = "rm";
+		rmResult.details.operations = ["rm"];
+		rmResult.details.changes = [{ op: "rm", task: "Plan the replacement" }];
+
+		const body = resultBody(rmResult, false);
+		expect(checklist(body).phases.map((phase) => phase.title)).toEqual(["Removed"]);
+		expect(rows(body).map((item) => ({ text: item.text, status: item.status }))).toEqual([
+			{ text: "Plan the replacement · removed", status: "dropped" },
+		]);
+	});
+
+	test("active reminder renders only the reminder event and no todo items", () => {
+		ensureThemeSync();
+		const component = renderReminder(
+			{
+				role: "custom",
+				customType: "mouriya.omp.todo-more.reminder",
+				content: "unused",
+				display: true,
+				timestamp: Date.now(),
+				details: {
+					items: [
+						{ phase: "Delivery", title: "Plan the replacement" },
+						{ phase: "Delivery", title: "Implement the card" },
+					],
+					attempt: 1,
+					max: 3,
+					more: snapshot,
+				},
+			},
+			{ expanded: false },
+			theme,
+		);
+		if (component === undefined) throw new Error("Expected a reminder component");
+
+		const ansi = component.render(100).join("\n");
+		expect(ansi).toContain("2 incomplete todos - reminder 1/3");
+		expect(ansi).not.toContain("Plan the replacement");
+		expect(ansi).not.toContain("Implement the card");
+
+		const described = component.describe?.({ supports: () => true } as never);
+		if (described === undefined || described === null) throw new Error("Expected a native reminder node");
+		const allNodes = nativeNodes([described]);
+		expect(allNodes.filter((entry) => entry.k === "checklist")).toHaveLength(0);
+		expect(allNodes.filter((entry) => entry.k === "kv")).toHaveLength(0);
+		expect(JSON.stringify(described)).toContain("2 incomplete todos - reminder 1/3");
+		expect(JSON.stringify(described)).not.toContain("Plan the replacement");
 	});
 });
 

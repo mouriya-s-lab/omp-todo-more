@@ -59,7 +59,6 @@ import { cfgTodoEager, cfgTodoReminders, cfgTodoRemindersMax } from "@oh-my-pi/p
 import { type NativeNode, node, span } from "@oh-my-pi/pi-tui";
 import { escapeXmlText } from "@oh-my-pi/pi-utils";
 import { errorText } from "./errors.ts";
-import { describeSnapshot } from "./native.ts";
 import {
 	actionableItems,
 	explanationText,
@@ -67,7 +66,6 @@ import {
 	readTodoMore,
 	TODO_MORE_ENTRY_TYPE,
 	type TodoItem,
-	type TodoMoreSnapshot,
 	type TodoMoreState,
 	timeEstimateText,
 	todoMoreSnapshotSchema,
@@ -672,35 +670,28 @@ function contextMessages(
 	return changed ? kept : undefined;
 }
 
-/** A reminder's display copy stays at its own event; terminal rendering remains the existing Text. */
+/** A reminder renders only its event header in the transcript, never the todo list. */
 class NativeReminderText extends Text {
 	constructor(
 		text: string,
 		private readonly header: string,
-		private readonly snapshot: TodoMoreSnapshot,
 	) {
 		super(text, 0, 0);
 	}
 
 	override describe(): NativeNode {
-		return node(
-			"card",
-			{ role: "todo-more.reminder", tone: "warning", head: [span(this.header, "strong")] },
-			describeSnapshot(this.snapshot),
-		);
+		return node("card", { role: "todo-more.reminder", tone: "warning", head: [span(this.header, "strong")] });
 	}
 }
 
 // @upstream adapted @oh-my-pi/pi-tui@18.10.1 src/chat/todo-reminder.ts#TodoReminderComponent
-const renderReminder: MessageRenderer = (message, _options, theme) => {
+export const renderReminder: MessageRenderer = (message, _options, theme) => {
 	const parsed = reminderDetailsSchema.safeParse(message.details);
 	if (!parsed.success) return undefined;
-	const { items, attempt, max, more } = parsed.data;
+	const { items, attempt, max } = parsed.data;
 	const count = items.length;
 	const header = `${count} incomplete ${count === 1 ? "todo" : "todos"} - reminder ${attempt}/${max}`;
-	const todoList = items.map((todo) => `  ${theme.checkbox.unchecked} ${todo.title}`).join("\n");
-	const text = `${theme.fg("warning", `${theme.icon.warning} ${header}`)}\n\n${theme.italic(todoList)}`;
-	return more === undefined ? new Text(text, 0, 0) : new NativeReminderText(text, header, more);
+	return new NativeReminderText(theme.fg("warning", `${theme.icon.warning} ${header}`), header);
 };
 // @upstream-end
 
@@ -872,7 +863,7 @@ export function registerReminders(pi: ExtensionAPI): void {
 						return {
 							message: {
 								customType: REMINDER_NOTICE_TYPE,
-								content: `Todo reminder ${own.details.attempt}/${own.details.max}: ${own.details.items.length} incomplete item(s): ${own.details.items.map((item) => item.title).join("; ")}`,
+								content: `Todo reminder ${own.details.attempt}/${own.details.max}: ${own.details.items.length} incomplete ${own.details.items.length === 1 ? "todo" : "todos"}`,
 								display: true,
 								details: own.details,
 								attribution: "agent",

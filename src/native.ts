@@ -1,7 +1,16 @@
 import type { ToolDefinition } from "@oh-my-pi/pi-coding-agent";
 import { type NativeChild, type NativeNode, node, stableKey } from "@oh-my-pi/pi-tui";
 import type { parametersSchema } from "./protocol.ts";
-import { callPreviewLines, compactTodoLabel, detailsSchema, isClosed, parseCall, progressCounts } from "./render.ts";
+import {
+	callPreviewLines,
+	compactRemovedLabel,
+	compactTodoLabel,
+	detailsSchema,
+	isClosed,
+	parseCall,
+	progressCounts,
+	resultView,
+} from "./render.ts";
 import { commitRecordText, type TodoMoreSnapshot, type TodoStatus, timeEstimateText } from "./state.ts";
 import type { TodoMoreDetails } from "./tool.ts";
 
@@ -195,6 +204,7 @@ export const describeTodoCall: NonNullable<ToolDefinition<typeof parametersSchem
 export const describeTodoResult: NonNullable<ToolDefinition<typeof parametersSchema, TodoMoreDetails>["describeResult"]> = (
 	result,
 	options,
+	args,
 ) => {
 	const parsed = detailsSchema.safeParse(result.details);
 	if (result.isError || !parsed.success) {
@@ -210,14 +220,78 @@ export const describeTodoResult: NonNullable<ToolDefinition<typeof parametersSch
 		tool: total === 0 ? { title: "Todo" } : { title: "Todo", target: `${closed}/${total}`, targetKind: "text" },
 		open: true,
 		preview: "none",
-		body: [node("col", { role: "todo-more.panel", gap: "sm" }, resultPanel(parsed.data.more, options.expanded))],
+		body: [node("col", { role: "todo-more.panel", gap: "sm" }, resultPanel(parsed.data, args, options.expanded))],
 	};
 };
 
-/** Native-shaped result card: objective alone when collapsed, closed phases folded, one row per task with estimate and blocker inline; expanding restores goal fields and explanations. */
-function resultPanel(more: TodoMoreSnapshot, expanded: boolean): NativeChild[] {
+/** Native-shaped result card: INIT/VIEW/expanded show the full list; incremental CRUD shows only the changed items/goal. */
+function resultPanel(details: TodoMoreDetails, args: unknown, expanded: boolean): NativeChild[] {
+	const { more } = details;
 	const phases = more.phases.filter((phase) => phase.items.length > 0);
 	if (phases.length === 0) return [node("text", { text: "Todo list is empty.", wrap: "word" }, undefined, "empty")];
+	const view = resultView(details, args, expanded);
+	if (view.kind === "delta") {
+		const children: NativeChild[] = [];
+		if (view.goalChanged) {
+			children.push(
+				node(
+					"kv",
+					{
+						role: "todo-more.goal",
+						items: [
+							{ k: "Objective", v: more.goal?.objective ?? "[goal missing]" },
+							{ k: "Measure", v: more.goal?.measure ?? "[goal missing]" },
+							{ k: "Done when", v: more.goal?.doneWhen ?? "[goal missing]" },
+						],
+					},
+					undefined,
+					"goal",
+				),
+			);
+		}
+		if (view.phases.length > 0) {
+			const checklistPhases = view.phases.map((phase, p) => {
+				switch (phase.kind) {
+					case "items":
+						return {
+							id: `p${p}`,
+							title: phase.name,
+							collapsed: false,
+							items: phase.items.map((item, t) => ({
+								id: `p${p}.${t}`,
+								text: compactTodoLabel(item),
+								status: checklistStatus(item.status),
+								...(phase.explained.has(item.title) ? { note: `Explanation: ${item.explanation ?? "[explanation missing]"}` } : {}),
+							})),
+						};
+					case "removed_phase":
+						return {
+							id: `p${p}`,
+							title: phase.name,
+							collapsed: false,
+							items: [{ id: `p${p}.0`, text: "Phase removed", status: "dropped" as const }],
+						};
+					case "removed_tasks":
+						return {
+							id: `p${p}`,
+							title: "Removed",
+							collapsed: false,
+							items: phase.titles.map((title, t) => ({
+								id: `p${p}.${t}`,
+								text: compactRemovedLabel(title),
+								status: "dropped" as const,
+							})),
+						};
+					default: {
+						const unreachable: never = phase;
+						throw new Error(`Unexpected delta phase: ${String(unreachable)}`);
+					}
+				}
+			});
+			children.push(node("checklist", { role: "todo-more.list", mode: "full", phases: checklistPhases }, undefined, "list"));
+		}
+		return children;
+	}
 	const goal = expanded
 		? node(
 				"kv",
@@ -236,7 +310,7 @@ function resultPanel(more: TodoMoreSnapshot, expanded: boolean): NativeChild[] {
 	const checklistPhases = phases.map((phase, p) => ({
 		id: `p${p}`,
 		title: phase.name,
-		collapsed: phase.items.every(isClosed),
+		collapsed: !expanded && phase.items.every(isClosed),
 		items: phase.items.map((item, t) => ({
 			id: `p${p}.${t}`,
 			text: compactTodoLabel(item),
